@@ -1,0 +1,40 @@
+generalConfig:
+  API_KEY: "912ebc938d348a811445ed26ac8f97b22d57e7ff"
+  YEAR: 2016
+  QTR: 1
+
+preprocessConfig:
+  DATA_IN_FOLDER: "DataDiag/DataIn/"
+  CBPDATA: "CBPdataRAW/cbp16co.txt"
+  IMPUTECBP: "ImputeCBP/efsy_cbp_2016.csv"
+  QWIDATA: "QWIdata/"
+  OUTPATH: "DataDiag/PythonPreprocessOut/"
+
+getNAICS6Config:
+  FUNCTIONSDIR: "./NAICS6_Pyfunctions/"
+  DATASET: "DataDiag/PythonPreprocessOut/combineQWIandCBP.csv"
+
+employmentConfig:
+  OLS_FORMULA: "Emp ~ EmpEnd + estnum + C(sector) + C(state)"
+  M2EMP_NOISECOEF: 1.69
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
+  OUTLIER_THRESH: 4.3 # Threshold for outliers using studentized residuals (4.3 chosen to filter out 0.3% of the dataset.)
+  RSEED: 5 # This RSEED is shared between employment imputation and microdata generation
+
+wageConfig:
+  OLS_FORMULA: "sqrt_wagediff ~ wageCBP_missing6by4*m3emp+poly(m3emp, degree=3)+C(sector)+C(state)"
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
+  OUTLIER_THRESH: 6.7 # Threshold for outliers using studentized residuals (6.7 chosen to filter out 0.3% of the dataset.)
+
+microdataConfig:
+  ## Dirichlet Prior parameters:
+  GAM_SHAPE: 10
+  GAM_SCALE: 200
+  NUMCHUNK: 35 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
+  OUTPATH: "DataDiag/PythonMicrodataSubsets/"
+
+postprocessingConfig:
+  INPATH: "DataDiag/PythonMicrodataSubsets/"
+  CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
+  FIPS_STATE_FILE: "DataDiag/FIPSstatecodename.txt"
+  OUTPATH: "./FinalMicrodata"

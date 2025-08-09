@@ -1,0 +1,22 @@
+total,domain,super_sector,naics_sector
+"10 Total, All Industries",101 Goods-Producing,1011 Natural Resources and Mining,"NAICS 11 Agriculture, Forestry, Fishing, and Hunting"
+"10 Total, All Industries",101 Goods-Producing,1011 Natural Resources and Mining,NAICS 21 Mining
+"10 Total, All Industries",101 Goods-Producing,1012 Construction ,NAICS 23 Construction
+"10 Total, All Industries",101 Goods-Producing,1013 Manufacturing,NAICS 31-33 Manufacturing
+"10 Total, All Industries",102 Service-Providing,"1021 Trade, Transportation, and Utilities",NAICS 42 Wholesale Trade
+"10 Total, All Industries",102 Service-Providing,"1021 Trade, Transportation, and Utilities",NAICS 44-45 Retail Trade
+"10 Total, All Industries",102 Service-Providing,"1021 Trade, Transportation, and Utilities",NAICS 48-49 Transportation and Warehousing
+"10 Total, All Industries",102 Service-Providing,"1021 Trade, Transportation, and Utilities",NAICS 22 Utilities
+"10 Total, All Industries",102 Service-Providing,1022 Information,NAICS 51 Information
+"10 Total, All Industries",102 Service-Providing,1023 Financial Activities,NAICS 52 Finance and Insurance
+"10 Total, All Industries",102 Service-Providing,1023 Financial Activities,NAICS 53 Real Estate and Rental and Leasing
+"10 Total, All Industries",102 Service-Providing,1024 Professional and Business Services,"NAICS 54 Professional, Scientific and Technical Services"
+"10 Total, All Industries",102 Service-Providing,1024 Professional and Business Services,NAICS 55 Management of Companies and Enterprises
+"10 Total, All Industries",102 Service-Providing,1024 Professional and Business Services,NAICS 56 Administrative and Waste Services
+"10 Total, All Industries",102 Service-Providing,1025 Education and Health Services,NAICS 61 Educational Services
+"10 Total, All Industries",102 Service-Providing,1025 Education and Health Services,NAICS 62 Health Care and Social Assistance
+"10 Total, All Industries",102 Service-Providing,1026 Leisure and Hospitality,"NAICS 71 Arts, Entertainment, and recreation"
+"10 Total, All Industries",102 Service-Providing,1026 Leisure and Hospitality,NAICS 72 Accommodation and Food Services
+"10 Total, All Industries",102 Service-Providing,1027 Other Services,NAICS 81 Other Services (Except Public Administration)
+"10 Total, All Industries",102 Service-Providing,1028 Public Administration,NAICS 92 Public Administration
+"10 Total, All Industries",102 Service-Providing,1029 Unclassified,NAICS 99 Unclassified
