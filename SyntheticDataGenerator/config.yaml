@@ -5,6 +5,7 @@ generalConfig:
 
 preprocessConfig:
   DATA_IN_FOLDER: "DataDiag/DataIn/"
+  CBPDIR: "CBPdataRAW/"
   CBPDATA: "CBPdataRAW/cbp16co.txt"
   IMPUTECBP: "ImputeCBP/efsy_cbp_2016.csv"
   QWIDATA: "QWIdata/"
