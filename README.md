@@ -4,6 +4,18 @@ The purpose of this project is to give users the tools needed to generate synthe
 ## Setup
 To get started with the repository
 ### Dependancies
+This project requires the following Python packages, which can be installed via pip using the command:
+```bash
+pip install pandas numpy scipy statsmodels scikit-learn patsy formulaic pyyaml tqdm
+```
+
+**Notes:**
+* Standard Library Dependencies:
+  * The following dependencies are included in Python and do not require separate installation: `re, random, time, os, sys, pathlib, multiprocessing`
+* Operating System support
+  * Some standard libraries such as `os` and `sys` have differing behaviors across operating systems. Our program has been tested to work on Unix-like systems (Linux/MacOS) and may not behave correctly on Windows.
+  * *If you are running the program on Windows, I reccomend using a virtual machine running some Linux distrobution or using The Windows Subsystem for Linux (WSL) from PowerShell https://learn.microsoft.com/en-us/windows/wsl/install*
+
 ### Installation
 ## Directories Overview
 ## Pre-generated Data
