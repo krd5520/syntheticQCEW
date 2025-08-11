@@ -1,5 +1,5 @@
 
-# syntheticQCEW
+# Synthetic QCEW Data Generator
 The purpose of this project is to give users the tools needed to generate synthetic data with rows for each establishment and columns for monthly employment, quarterly wages, industry codes, and geographic codes to match the structure of the Quarterly Census on Employment and Wages (QCEW). Users can specify parameters and generating models in `config.yaml` to generate data matching their needs.
 
 
