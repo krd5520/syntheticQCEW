@@ -56,8 +56,8 @@ To use the synthetic data generator follow these steps:
 	* Run the python script `CBP_QWI_download.py`	which will automatically download the required County Business Patterns (CBP) and Quarterly Workforce Indicators (QWI) datasets and place them in the directories specified in `config.yaml`
 	* Download the CBP dataset imputed by Eckert Et al. https://doi.org/10.3886/E117464V1
 		1. Select `Imputed-CBP-Files/efsy_cbp_2016.zip`
-		2. Extract the the archive using `7z x efsy_cbp_2016.zip`
-		3. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml`
+		2. Extract the the archive using `7z`
+		4. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml`
 ### Changing parameters and model formulas
 ### Combining the Census Datasets
 1. Run the python script `preprocess_combine.py` which combines all of the datasets gathered in the previous step, creates a new directory called `PythonPreprocessOut` in the location specified in `config.yaml` and saves `combineQWIandCBP.csv` in the new directory.
@@ -68,10 +68,8 @@ To use the synthetic data generator follow these steps:
 **Note:**  The script `preprocess_combine` can sometimes generate data that is not compatible with the wage imputation step of the pipeline. If you are getting errors at this step you can replace the `combineQWIandCBP.csv` file with the one provided in the `Datasets` directory.
 
 ## Pre-generated Data
-For those that just want to use the synthetic dataset without specifying any parameters, you can find a pre-generated dataset which uses the default values specified in `config.yaml` at `syntheticQCEW/Datasets/FinalMicroda.zip` which can be extracted using 7z using the command
-```bash
-7z x ./Datasets/FinalMicrodata.zip
-```
+For those that just want to use the synthetic dataset without specifying any parameters, you can find a pre-generated dataset which uses the default values specified in `config.yaml` at `syntheticQCEW/Datasets/FinalMicroda.zip` which can be extracted using `7z`
+
 ## Studies and Justifications
 ## Alternative Method for downloading Census datasets
 
