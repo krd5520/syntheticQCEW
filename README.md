@@ -42,8 +42,7 @@ syntheticQCEW/
 ## Usage
 To use the synthetic data generator follow these steps:
 ### Initial Setup
-1. Follow the cloning process and install the required dependencies as outlined in #Setup
-2. Request an API key from: https://api.census.gov/data/key_signup.html
+1. Request an API key from: https://api.census.gov/data/key_signup.html
 	* Add this to `config.yaml` under `generalConfig`
 	```
 	generalConfig:
@@ -51,7 +50,7 @@ To use the synthetic data generator follow these steps:
 		YEAR: 2016
 		QTR: 1
 	```
-3. Download all required Census datasets:
+2. Download all required Census datasets:
 **Note:** If you have trouble obtaining an API key, you can check the section `#Alternative Method for downloading datasets` for alternative download steps.
 	* Run the python script `CBP_QWI_download.py`	which will automatically download the required County Business Patterns (CBP) and Quarterly Workforce Indicators (QWI) datasets and place them in the directories specified in `config.yaml`
 	* Download the CBP dataset imputed by Eckert Et al. https://doi.org/10.3886/E117464V1
@@ -59,6 +58,7 @@ To use the synthetic data generator follow these steps:
 		2. Extract the the archive using `7z`
 		4. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml`
 ### Changing parameters and model formulas
+Change parameters and models defined in `config.yaml` to suit your needs
 ### Combining the Census Datasets
 1. Run the python script `preprocess_combine.py` which combines all of the datasets gathered in the previous step, creates a new directory called `PythonPreprocessOut` in the location specified in `config.yaml` and saves `combineQWIandCBP.csv` in the new directory.
 ### Generating Synthetic QCEW data:
@@ -71,5 +71,8 @@ To use the synthetic data generator follow these steps:
 For those that just want to use the synthetic dataset without specifying any parameters, you can find a pre-generated dataset which uses the default values specified in `config.yaml` at `syntheticQCEW/Datasets/FinalMicroda.zip` which can be extracted using `7z`
 
 ## Studies and Justifications
+See the `Studies/` directory for:
+* Model selection justifications
+* sdffds
 ## Alternative Method for downloading Census datasets
 
