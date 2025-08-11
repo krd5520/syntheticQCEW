@@ -22,7 +22,7 @@ pip install pandas numpy scipy statsmodels scikit-learn patsy formulaic pyyaml t
   * *If you are running the program on Windows, I recommend using a virtual machine running some Linux distrobution or using The Windows Subsystem for Linux (WSL) https://learn.microsoft.com/en-us/windows/wsl/install*
 
 ## Directories Overview
-Here is a brief visual overview of the project's repository:
+Here is a brief visual overview of the project repository:
 ```
 syntheticQCEW/
 ├── Datasets/               		# Contains pre-generated datasets
