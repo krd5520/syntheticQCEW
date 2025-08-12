@@ -1,3 +1,5 @@
+
+
 # Synthetic QCEW Data Generator
 The purpose of this project is to give users the tools needed to generate synthetic data with rows for each establishment and columns for monthly employment, quarterly wages, industry codes, and geographic codes to match the structure of the Quarterly Census on Employment and Wages (QCEW). Users can specify parameters and generating models in `config.yaml` to generate data matching their needs.
 
@@ -70,7 +72,6 @@ Change parameters and models defined in `config.yaml` to suit your needs
 For those that just want to use the synthetic dataset without specifying any parameters, you can find a pre-generated dataset which uses the default values specified in `config.yaml` at `syntheticQCEW/Datasets/FinalMicroda.zip` which can be extracted using `7z`
 
 ## Studies and Justifications
-<<<<<<< HEAD
 See the `Studies/` directory for Jupyter Notebooks on:
 * Default Model/parameter selection justifications
 * Comparison to true QCEW data
@@ -105,9 +106,4 @@ If for some reason you are unable to obtain an API key from census.gov, you may 
 4. Select County File
 5. Extract the archive and save as `cbp16co.txt` in the `CBPdataRaw` directory specified in `config.yaml`   
 
-=======
-See the `Studies/` directory for:
-* Model selection justifications
-* sdffds
-## Alternative Method for downloading Census datasets
 
