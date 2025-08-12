@@ -1,0 +1,4 @@
+Number of rows,columns in CBP:  (1854430, 9)
+Number of rows,columns in QWI:  (439487, 15)
+Number of rows in CBP but not QWI:  1851300
+Number of rows in QWI but not CBP:  0
