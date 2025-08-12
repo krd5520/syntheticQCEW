@@ -102,8 +102,8 @@ If for some reason you are unable to obtain an API key from census.gov, you may 
 	9. Save these files into the `QWIdata` directory specified in `config.yaml` as `qwi_co#.csv` where `#` indexes your grouping of states.
 
 **Downloading County Business Patterns (CBP):**
-3. Navigate to https://www.census.gov/data/datasets/2016/econ/cbp/2016-cbp.html
-4. Select County File
-5. Extract the archive and save as `cbp16co.txt` in the `CBPdataRaw` directory specified in `config.yaml`   
+1. Navigate to https://www.census.gov/data/datasets/2016/econ/cbp/2016-cbp.html
+2. Select County File
+3. Extract the archive and save as `cbp16co.txt` in the `CBPdataRaw` directory specified in `config.yaml`   
 
 
