@@ -229,7 +229,7 @@ def wagesFromQWI(df, empmat):
     # Multiply employment by earnings
     empmat = empmat.astype(float)
     earnbeg = df['EarnBeg'].astype(float)
-    wages = np.sum(empmat, axis=1) * earnbeg.values
+    wages = np.sum(empmat, axis=1) * earnbeg.values/1000 #match the scale of qp1
     return wages
 
 

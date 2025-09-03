@@ -30,6 +30,7 @@ onROAR=True
 # Tell the user where the dataset is located
 print('---------- Loading Dataset ----------\n')
 print(f"Dataset location: {getNAICS6Config['DATASET']}")
+np.random.seed(generalConfig["SEED"])
 df = pd.read_csv(getNAICS6Config['DATASET'], dtype=str)#, nrows=100000)
 df['year'] = 2016
 df['quarter'] = 1

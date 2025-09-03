@@ -1,4 +1,5 @@
 generalConfig:
+  SEED: 1
   API_KEY: "912ebc938d348a811445ed26ac8f97b22d57e7ff"
   YEAR: 2016
   QTR: 1
@@ -29,8 +30,10 @@ wageConfig:
 
 microdataConfig:
   ## Dirichlet Prior parameters:
-  GAM_SHAPE: 10
-  GAM_SCALE: 200
+  EST_SEED: 1
+  GAM_SHAPE: 3 #10
+  GAM_SCALE: 20 #200
+  WAGE_MIN: 10
   NUMCHUNK: 35 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
   OUTPATH: "DataDiag/PythonMicrodataSubsets/"
 
