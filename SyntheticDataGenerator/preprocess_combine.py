@@ -131,7 +131,7 @@ def preprocess_qwi(qwi,forcombine=False):
     # If sum over all "------", otherwise naisc with trailing '/' to be 6 characters
     qwi[['geography','industry']] = qwi[['geography','industry']].astype(str)
     qwi.loc[qwi.ind_level=="A",'industry'] = "------"
-    qwi['industry'] = qwi['industry'].str.rjust(6,"/")
+    qwi['industry'] = qwi['industry'].str.ljust(6,"/")
 
     # make unique indentifier
     qwi['geoindkey'] = qwi['geography']+"_"+qwi['industry']
@@ -212,3 +212,4 @@ combine_qwi_cbp(rawfile=foldername + preprocessConfig['CBPDATA'],
                    outfilename='combineQWIandCBP.csv',
                    printdiagnostics=True,
                    outfilepath = preprocessConfig['OUTPATH'])
+
