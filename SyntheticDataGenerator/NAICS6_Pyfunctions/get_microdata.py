@@ -239,7 +239,7 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
     transpose_establishment_props = np.transpose(establishment_props) #transpose it for matrix multiplication
 
 
-    conf_values = naics6row[["m1emp","m3emp","wage"]].to_numpy() #confidential values as an array
+    conf_values = naics6row["m1emp","m3emp","wage"].to_numpy() #confidential values as an array
 
     establishment_values = np.multiply(conf_values,transpose_establishment_props) #establishment level values
     establishment_rows = np.transpose(establishment_values) #transpose for ease in creating data frame
@@ -249,7 +249,7 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
     m1emp=np.rint(np.array(establishment_rows[0],dtype="float"))
     m3emp=np.rint(np.array(establishment_rows[1],dtype="float"))
 
-    m1emp, m3emp=adjust_emp_all_zeros(naics6row[["m1emp"]].to_numpy(),naics6row[["m3emp"]].to_numpy(),m1emp,m3emp,1)
+    m1emp, m3emp=adjust_emp_all_zeros(naics6row["m1emp"].to_numpy(),naics6row["m3emp"].to_numpy(),m1emp,m3emp,1)
     m2emp = get_m2emp_estlevel(m1emp,m3emp,noisecoef=noisecoef) #get m2emp based on m1emp and m2emp
 
     #for state, cnty, and naics6 code,
