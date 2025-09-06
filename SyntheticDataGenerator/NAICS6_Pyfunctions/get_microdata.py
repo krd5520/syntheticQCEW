@@ -233,7 +233,7 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
     ## These proportions are multiplied by the confidential values at the naics6 level to get establishment level values
     n = naics6row['estnum'] #number of establishments
     minwage_reserve=wagemin*n
-    naics6row[["wage"]]=naics6row[["wage"]]-minwage_reserve
+    naics6row["wage"]=naics6row["wage"]-minwage_reserve
     shape_parameters = get_dirichlet_prior(n,g_shape=gamma_shape,g_scale=gamma_scale) #shape params for dirichlet generation
     establishment_props = np.random.dirichlet(shape_parameters,3) #randomly generated proportions
     transpose_establishment_props = np.transpose(establishment_props) #transpose it for matrix multiplication
