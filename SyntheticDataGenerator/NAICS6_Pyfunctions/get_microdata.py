@@ -249,7 +249,7 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
     m1emp=np.rint(np.array(establishment_rows[0],dtype="float"))
     m3emp=np.rint(np.array(establishment_rows[1],dtype="float"))
 
-    m1emp, m3emp=adjust_emp_all_zeros(naics6row["m1emp"].to_numpy(),naics6row["m3emp"].to_numpy(),m1emp,m3emp,1)
+    #m1emp, m3emp=adjust_emp_all_zeros(naics6row["m1emp"].to_numpy(),naics6row["m3emp"].to_numpy(),m1emp,m3emp,1)
     m2emp = get_m2emp_estlevel(m1emp,m3emp,noisecoef=noisecoef) #get m2emp based on m1emp and m2emp
 
     #for state, cnty, and naics6 code,
