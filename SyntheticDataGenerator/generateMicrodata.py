@@ -22,6 +22,7 @@ from WageFunctions import *
 from NAICS6functions import *
 from get_microdata import *
 from MicrodataPostprocessing import *
+from heircharcy_geoindkey import *
 pd.set_option("display.max_columns", None)  
 onROAR=True
 
@@ -32,24 +33,28 @@ print('---------- Loading Dataset ----------\n')
 print(f"Dataset location: {getNAICS6Config['DATASET']}")
 np.random.seed(generalConfig["SEED"])
 df = pd.read_csv(getNAICS6Config['DATASET'], dtype=str)#, nrows=100000)
-df['year'] = 2016
-df['quarter'] = 1
+
 df = df.iloc[:, 1:] # Remove index
-dfsave = df.copy()
-df = pd.concat([df, pd.DataFrame([{
-    "state": "29", "cnty": "198", "emp": "1", "geoindkey": "29189_525990",
-    "qp1_nf": "Impute", "qp1": "0", "estnum": "2", "geo_level": "C",
-    "geography": "29189", "ind_level": "6", "industry": "525990",
-    "year": "2016", "quarter": "1",
-    "EarnBeg": None, "EarnHirAS": None, "Emp": None, "EmpEnd": None, "EmpS": None,
-    "sEarnBeg": None, "sEarnHirAS": None, "sEmp": None, "sEmpEnd": None, "sEmpS": None
-}])], ignore_index=True)
-df.loc[df['geoindkey'].str.contains("29189_5259//", regex=True), 'qp1_nf'] = "Impute"
+#dfsave = df.copy()
+
+#In 2016 this NAICS 4 has no corresponding NAICS 6
+if "29189_525990" not in df["geoindkey"]:
+    df = pd.concat([df, pd.DataFrame([{
+        "state": "29", "cnty": "198", "emp": "1", "geoindkey": "29189_525990",
+        "wages_cbp_flag": "Impute", "wages_cbp": "0", "estnum": "2", "geo_level": "C",
+        "geography": "29189", "ind_level": "6", "industry": "525990",
+        "EarnBeg": None, "EarnHirAS": None, "Emp": None, "EmpEnd": None, "EmpS": None,
+        "sEarnBeg": None, "sEarnHirAS": None, "sEmp": None, "sEmpEnd": None, "sEmpS": None
+    }])], ignore_index=True)
+    df.loc[df['geoindkey'].str.contains("29189_5259//", regex=True), 'wages_cbp_flag'] = "Impute"
+
+df['year'] = generalConfig['YEAR']
+df['quarter'] = generalConfig['QTR']
 # Extract 6-digit NAICS
 df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
 df6['geo4naics'] = df6['geoindkey'].str[:-2]
 df6['geo5naics'] = df6['geoindkey'].str[:-1]
-df6 = df6[['geoindkey', 'geo4naics', 'geo5naics', 'state', 'cnty', 'estnum', 'qp1', 'qp1_nf', 'emp']]
+df6 = df6[['geoindkey', 'geo4naics', 'geo5naics', 'state', 'cnty', 'estnum', 'wages_cbp', 'wages_cbp_flag', 'emp']]
 # Get summary counts for distribution
 count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6)
 # Filter and prepare 4-digit NAICS data
@@ -57,14 +62,15 @@ df4 = df[df['industry'] != "------"].copy()
 df4 = df[df['industry'].notna()].copy() 
 df4 = df4[df4['industry'].str.match(r"^[0-9]{4}[^0-9]{2}", na=False)]
 # Create derived columns
-df4['sector'] = df4['industry'].str[:2]
+df4=fill_from_geoindkey(df4,numeric_ind_level=True)
+df4['naics2'] = df4['industry'].str[:2]
 df4['state'] = df4['geography'].str[:-3]
 df4['geo4naics'] = df4['geoindkey'].str[:-2]
 df4['geo3naics'] = df4['geoindkey'].str[:-3]
 # Merge with summary data
 df4 = df4.merge(count6dig, on='geo4naics', how='left')
-df4['wagediff'] = df4['qp1'].astype(float) - df4['wageCBP_sum6by4'].astype(float)
-columns_to_convert = ['emp', 'qp1', 'estnum', 'year', 'quarter', "sEmp"]
+df4['wagediff'] = df4['wages_cbp'].astype(float) - df4['wageCBP_sum6by4'].astype(float)
+columns_to_convert = ['emp', 'wages_cbp', 'estnum', 'year', 'quarter', "sEmp"]
 df4[columns_to_convert] = df4[columns_to_convert].astype(float)
 
 ############## Employment Counts ################
@@ -123,7 +129,7 @@ naics6df = get_6naics_all(df=df6,df4n=df4imp,codes4summary = count6dig)
 # Final formatting and output
 naics6df = naics6df.iloc[:, :5].join(naics6df[['m1emp', 'm3emp', 'wage']])
 naics6df.head(50)
-naics6df.to_csv('DataNAICS6.csv')
+naics6df.to_csv(str(generalConfig["NAICS6_FILE"]))
 
 ################## Get Microdata #######################
 # Display all current microdataConfig settings
@@ -132,8 +138,8 @@ for key, value in microdataConfig.items():
     print(f"{key}: {value}")
 print('---------- Making Synthetic Microdata ----------')
 print('This may take a while, please be patient...')
-naics6df = pd.read_csv("./DataNAICS6.csv")#, nrows=10000)
-random.seed(employmentConfig['RSEED'])
+naics6df = pd.read_csv(str(generalConfig["NAICS6_FILE"]))#, nrows=10000)
+random.seed(microdataConfig['EST_SEED'])
 tempdf = make_syn_microdata(naics6df,numchunk=microdataConfig['NUMCHUNK'],outfoldername=microdataConfig['OUTPATH'])
 
 ################## Microdata Postprocessing #######################

@@ -5,13 +5,13 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import yaml
-with open('../config.yaml', 'r') as configFile:
-    config = yaml.safe_load(configFile)
-    microdataConfig = config['microdataConfig']
-    employmentConfig = config['employmentConfig']
+# with open('../config.yaml', 'r') as configFile:
+#     config = yaml.safe_load(configFile)
+#     microdataConfig = config['microdataConfig']
+#     employmentConfig = config['employmentConfig']
 def get_dirichlet_prior(estnum, g_shape, g_scale): 
     #generate gamma random variables to be shape parameters
-    params = np.random.gamma(g_shape,g_scale,estnum)
+    params = np.random.gamma(float(g_shape),float(g_scale),int(estnum))
     # shape and scale paramters for the gamma distribution were select by trial and error to get
     # some variety of proportions (not essentially equal across all establishments) while getting
     # similiar proportions per establishment across the generated dirichlet 
@@ -55,37 +55,57 @@ def get_m2emp_estlevel(m1emp,m3emp,noisecoef):
         m2emp = np.where((m2emp <= 0) & ((m1emp!=0)&(m3emp!=0)), 1, m2emp) #month 1 & 3 have employees -> month 2 does too
     return np.rint(m2emp)
 
-
-def adjust_emp_all_zeros(n6m1emp, n6m3emp, m1emp, m3emp, iter=1):
-
-    m1empgeq1 = np.argwhere(m1emp > 1)
-    if m1empgeq1 is None:
-        m1empgeq1 = np.array()
-    else:
-        m1empgeq1 = m1empgeq1.reshape(-1)
-    m3empgeq1 = np.argwhere(m3emp > 1)
-    if m3empgeq1 is None:
-        m3empgeq1 = np.array()
-    else:
-        m3empgeq1 = m3empgeq1.reshape(-1)
-    m1empgeq0 = np.argwhere(m1emp > 0)
-    m3empgeq0 = np.argwhere(m3emp > 0)
-    bothgeq0 = np.intersect1d(m1empgeq0, m3empgeq0)
-    if bothgeq0 is None:
-        bothgeq0 = np.array()
-    # bothgeq0 = np.array([e in m1empgeq0.to_list() if e in m3empgeq0.to_list()])
-    if len(m1empgeq1) + len(m3empgeq1) == 0:
-        botheq1 = bothgeq0
-    else:
-        if len(m1empgeq1) < 1 or len(m3empgeq1) < 1:
-            allgeq1 = np.append(m1empgeq1, m3empgeq1)
+def find_emp_adj(m1emp,m3emp,addonidx,cntyN6):
+    stopidx=False
+    m1empg0 = np.argwhere(m1emp > 0)
+    m3empg0 = np.argwhere(m3emp > 0)
+    m1empeq1=np.argwhere(m1emp < 2)
+    m3empeq1=np.argwhere(m3emp < 2)
+    m1empeq0=np.argwhere(m1emp<1)
+    m3empeq0=np.argwhere(m3emp<1)
+    
+    cantusem1emp= np.intersect1d(m1empg0,np.intersect1d(m1empeq1,m3empeq0))
+    cantusem3emp=np.intersect1d(m3empg0,np.intersect1d(m1empeq0,m3empeq1))
+    if m1empg0 is not None:
+        if cantusem1emp is not None:
+            canusem1emp=np.setdiff1d(m1empg0,cantusem1emp)
         else:
-            allgeq1 = np.concatenate([m1empgeq1, m3empgeq1])
-        botheq1 = np.setdiff1d(bothgeq0, allgeq1)  # essentially m1emp=1,m3emp=1
-        if botheq1 is None:
-            botheq1 = np.array()
+            canusem1emp=m1empg0
+    else:
+        canusem1emp=None
+    if m3empg0 is not None:
+        if cantusem3emp is not None:
+            canusem3emp=np.setdiff1d(m3empg0,cantusem3emp)
+        else:
+            canusem3emp=m3empg0
+    else:
+        canusem3emp=None
+    if canusem3emp is not None and canusem1emp is not None and len(canusem1emp)>0 and len(canusem3emp)>0:
+        #print("len(canusem1emp)="+str(len(canusem1emp))+" ln(canusem3emp)="+str(len(canusem3emp)))
+        selectwhich=np.random.randint(0,1)
+        if selectwhich==1:
+            m3emp[addonidx] = m3emp[addonidx] + 1
+            m3empsubtract = np.random.choice(canusem3emp,1,False)
+            m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
+        else:
+            m1emp[addonidx] = m1emp[addonidx] + 1
+            m1empsubtract = np.random.choice(canusem1emp,1,False)
+            m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
+    elif canusem3emp is not None and len(canusem3emp)>0:
+        m3emp[addonidx] = m3emp[addonidx] + 1
+        m3empsubtract = np.random.choice(canusem3emp,1,False)
+        m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
+    elif canusem1emp is not None and len(canusem1emp)>0:
+        m1emp[addonidx] = m1emp[addonidx] + 1
+        m1empsubtract = np.random.choice(canusem1emp,1,False)
+        m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
+    else:
+        stopidx=True
+        #print("Warning: some establishments have all zero employment."+str(cntyN6))
+    return m1emp, m3emp, stopidx
+    
 
-
+def adjust_emp_all_zeros(n6m1emp, n6m3emp, m1emp, m3emp, cntyN6):
 
     m1empzero = np.argwhere(m1emp<1)
     m3empzero=np.argwhere(m3emp<1)
@@ -100,123 +120,25 @@ def adjust_emp_all_zeros(n6m1emp, n6m3emp, m1emp, m3emp, iter=1):
         if np.add(n6m1emp,n6m3emp) < 0:
             m1emp[allzeros] = m1emp[allzeros] + 1
         else:
-            if len(m1empgeq1) > 0:
-                m1emp[allzeros] = m1emp[allzeros] + 1
-                m1empsubtract = m1empgeq1[0]
-                #print("numallzeros="+str(numallzeros)+" m1empsubtract length=1")
-                m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
-            elif len(m3empgeq1) > 0:
-                m3emp[allzeros] = m3emp[allzeros] + 1
-                m3empsubtract = m3empgeq1[0]
-                #print("numallzeros="+str(numallzeros)+" m3empsubtract length=1" )
-                m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-            elif len(bothgeq0) > 0:
-                m3emp[allzeros] = m3emp[allzeros] + 1
-                m3empsubtract = bothgeq0[0]
-                #print("numallzeros="+str(numallzeros)+" m3empsubtract length=1")
-                m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-            else:
-                #print("adding one to naics6 employment to correct establishments")
-                m1emp[allzeros] = m1emp[allzeros] + 1
+            m1emp, m3emp, stopidx=find_emp_adj(m1emp,m3emp,allzeros,cntyN6+" m1:m3="+str(n6m1emp)+" : "+str(n6m3emp))
     else:  # len(m1empgeq1)+len(m3empgeq1)+len(bothgeq0)>=numallzeros:
-        combolen=len(m1empgeq1)+len(m3empgeq1)
-        #print("combolen is "+str(combolen)+" numallzeros is"+str(numallzeros))
-        if combolen >= numallzeros:
-            if m1empgeq1 is None or len(m1empgeq1)==0:
-                #print("combolen>numallzeros but m1empgeq1=0")
-                m3emp[allzeros] = m3emp[allzeros] + 1
-                m3empsubtract = np.random.choice(m3empgeq1,len(allzeros),False)
-                m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-                #print("numallzeros="+str(numallzeros)+" m3empsubtract length=" + str(len(m3empsubtract)))
-            elif m3empgeq1 is None or len(m3empgeq1)==0:
-                #print("combolen>=numallzeros but m3empgeq1=0")
-                m1emp[allzeros] = m1emp[allzeros] + 1
-                m1empsubtract = np.random.choice(m1empgeq1.reshape(-1), len(allzeros),False)
-                #print("numallzeros="+str(numallzeros)+" m1empsubtract length=" + str(len(m1empsubtract)))
-                m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
-            else:
-                #print("combolen>=numallzeros and m1empgeq1>0 and m3empgeq1>0")
-                minsplit = max(0, len(m3empgeq1) - 1)
-                maxsplit = numallzeros - len(m1empgeq1)
-                if maxsplit<=0:
-                    maxsplit=numallzeros-1
-                if minsplit<maxsplit:
-                    splitpoint = np.random.randint(minsplit, maxsplit)
-                else:
-                    splitpoint=maxsplit
-                #print("minsplit is "+str(minsplit)+" maxsplit is "+str(maxsplit)+" splitpoint is"+str(splitpoint))
-                if splitpoint == 0:
-                    m3emp[allzeros] = m3emp[allzeros] + 1
-                    m3empsubtract = m3emp[:len(allzeros)]
-                    m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-                    #print("numallzeros="+str(numallzeros)+" m3empsubtract length=" + str(len(m3empsubtract)))
-                elif splitpoint == numallzeros - 1:
-                    m1emp[allzeros] = m1emp[allzeros] + 1
-                    m1empsubtract = m1emp[:len(allzeros)]
-                    m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
-                    #print("numallzeros="+str(numallzeros)+" m1empsubtract length=" + str(len(m1empsubtract)))
-                else:
-                    m1empadd = allzeros[:splitpoint]
-                    m3empadd = allzeros[splitpoint:]
-                    m3empsubtract = np.random.choice(m3empgeq1, len(m3empadd),False)
-                    m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-                    m3emp[m3empadd] = m3emp[m3empadd] + 1
-                    m1emp[m1empadd] = m1emp[m1empadd] + 1
-                    m1empsubtract = np.random.choice(m1empgeq1, len(m1empadd),False)
-                    #print("numallzeros="+str(numallzeros)+" m1empsubtract+m3empsubtract length=" + str(len(m3empsubtract)+len(m1empsubtract)))
-                    m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
-        elif len(botheq1)>0 and combolen + len(botheq1) >= numallzeros:
-            #print("combolen+len(botheq1)>=numallzeros")
-            tempm1empsubtract = m1empgeq1
-            m3empsubtract = m3empgeq1
-            if len(botheq1) == 1:
-                bonusm1empsubtract = botheq1
-            else:
-                bonusm1empsubtract = np.random.choice(botheq1, numallzeros - len(m1empgeq1) - len(m3empgeq1),False)
-            m1empsubtract = np.concat([bonusm1empsubtract, tempm1empsubtract])
-            #print("numallzeros="+str(numallzeros)+" m1empsubtract+m3empsubtract length=" + str(len(m3empsubtract)+len(m1empsubtract)))
-            m1empadd = allzeros[:len(m1empsubtract)]
-            m3empadd = allzeros[len(m1empsubtract):]
-            m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-            m3emp[m3empadd] = m3emp[m3empadd] + 1
-            m1emp[m1empadd] = m1emp[m1empadd] + 1
-            m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
-        else:
-            #print("subtract from m1empgeq1 and botheq1 and m3empgeq1, then iterate")
-            m1empsubtract = np.concat(m1empgeq1, botheq1)
-            m3empsubtract = m3empgeq1
-            m1empadd = allzeros[:len(m1empsubtract)]
-            m3empadd = allzeros[len(m1empsubtract):]
-            m3emp[m3empsubtract] = m3emp[m3empsubtract] - 1
-            m3emp[m3empadd] = m3emp[m3empadd] + 1
-            m1emp[m1empadd] = m1emp[m1empadd] + 1
-            m1emp[m1empsubtract] = m1emp[m1empsubtract] - 1
-
-    m1empzero = np.argwhere(m1emp < 1)
-    m3empzero = np.argwhere(m3emp < 1)
-    allzeros = np.intersect1d(m1empzero, m3empzero)
-    if allzeros is None:
-        numallzeros=0
-    else:
-        numallzeros = len(allzeros)
-    if numallzeros == 0:
-        return (m1emp, m3emp)
-    elif numallzeros > 1 and iter < 50:
-        #print(iter)
-        return (adjust_emp_all_zeros(n6m1emp=n6m1emp, n6m3emp=n6m3emp, m1emp=m1emp, m3emp=m3emp, iter=iter + 1))
-    else:
-        #print("adding one to naics6 employment to correct establishments")
-        m1emp[allzeros] = m1emp[allzeros] + 1
-        return (m1emp, m3emp)
+        stopidx=False
+        for zeroidx in allzeros:
+            m1emp, m3emp, stopidx=find_emp_adj(m1emp,m3emp,zeroidx,cntyN6+" m1:m3="+str(n6m1emp)+" : "+str(n6m3emp))
+            if ~stopidx:
+                return m1emp, m3emp
+    return m1emp, m3emp
+                
+     
 
 
 
     ## generate establishments for each county x 6-digit NAICS code. The number of establishments is determined by estnum
 ## the confidential values should sum to the aggregate values at the county x 6-digit NAICS code level.
-def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GAM_SHAPE'],
-                                       gamma_scale=microdataConfig['GAM_SCALE'],
-                                       noisecoef=employmentConfig['M2EMP_NOISECOEF'],
-                                       wagemin=microdataConfig["WAGE_MIN"]):
+def get_establishments_from_one_naics6(naics6row,gamma_shape,
+                                       gamma_scale,
+                                       noisecoef,
+                                       wagemin=1):
     ## For conf values we get a random proportion for each establishment that sum to 1 (repeat for 4 conf values).
     ## Goals for Proportions:
     #### 1.  Aim to preserve the relationships between each employee count and wages within an establishment
@@ -231,15 +153,17 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
     #### 4. Generate m2emp based on m1emp and m3emp for each establishment (using noisecoef value)
     ## default gamma values were selected by trying several combinations, until I felt we had the balance of the two goals
     ## These proportions are multiplied by the confidential values at the naics6 level to get establishment level values
+    
+
     n = naics6row['estnum'] #number of establishments
-    minwage_reserve=wagemin*n
-    naics6row[["wage"]]=naics6row[["wage"]]-minwage_reserve
-    shape_parameters = get_dirichlet_prior(n,g_shape=gamma_shape,g_scale=gamma_scale) #shape params for dirichlet generation
+    minwage_reserve=float(wagemin)*float(n)
+    naics6row["wage"]=float(naics6row["wage"])-float(minwage_reserve)
+    shape_parameters = get_dirichlet_prior(n,g_shape=float(gamma_shape),g_scale=float(gamma_scale)) #shape params for dirichlet generation
     establishment_props = np.random.dirichlet(shape_parameters,3) #randomly generated proportions
     transpose_establishment_props = np.transpose(establishment_props) #transpose it for matrix multiplication
 
 
-    conf_values = naics6row[["m1emp","m3emp","wage"]].to_numpy() #confidential values as an array
+    conf_values = np.array([naics6row["m1emp"],naics6row["m3emp"],naics6row["wage"]]) #confidential values as an array
 
     establishment_values = np.multiply(conf_values,transpose_establishment_props) #establishment level values
     establishment_rows = np.transpose(establishment_values) #transpose for ease in creating data frame
@@ -249,14 +173,15 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
     m1emp=np.rint(np.array(establishment_rows[0],dtype="float"))
     m3emp=np.rint(np.array(establishment_rows[1],dtype="float"))
 
-    m1emp, m3emp=adjust_emp_all_zeros(naics6row[["m1emp"]].to_numpy(),naics6row[["m3emp"]].to_numpy(),m1emp,m3emp,1)
+    identifier=str(naics6row["state"])+str(naics6row["cnty"])+"_"+str(naics6val)+" n="+str(n)
+    m1emp, m3emp=adjust_emp_all_zeros(naics6row["m1emp"],naics6row["m3emp"],m1emp,m3emp,identifier)
     m2emp = get_m2emp_estlevel(m1emp,m3emp,noisecoef=noisecoef) #get m2emp based on m1emp and m2emp
 
     #for state, cnty, and naics6 code,
     ##  the value from the naics6 row is repeated the same number of times as number of establishment
-    establishments = pd.DataFrame({"state":[naics6row['state']]*n,
-                                   "cnty":[naics6row['cnty']]*n,
-                                   "naics6":[naics6val]*n,
+    establishments = pd.DataFrame({"state":[naics6row['state']]*int(n),
+                                   "cnty":[naics6row['cnty']]*int(n),
+                                   "naics6":[naics6val]*int(n),
                                    "m1emp":m1emp, #add m1emp
                                    "m2emp":m2emp, #add m2emp
                                    "m3emp":m3emp, #add m3mp
@@ -277,8 +202,12 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape=microdataConfig['GA
 ### OUTPUTS: 
 ##### technically returns the etsablishment level data for the last subset of the naics6 data. However, it saves 
 ##### also saves each iterations' establishment level data in folder specified.
-def make_syn_microdata(naics6df,numchunk,testsubset=False,outfoldername=os.getcwd(),rseed=microdataConfig["EST_SEED"]):
-    np.random.seed(rseed)
+def make_syn_microdata(naics6df,microdataConfig,testsubset=False,outfoldername=os.getcwd(),rseed=None):
+    if rseed is None and microdataConfig['EST_SEED'] is not None:
+        rseed=microdataConfig['EST_SEED']
+    if rseed is not None:
+        np.random.seed(rseed)
+    numchunk=microdataConfig['NUMCHUNK']
     counter=0 #to help name the files produced
     
     #split data into numchunk+1 subsets (the +1 is subset of size = the remainder of number of rows divided by numchunk)
@@ -295,7 +224,10 @@ def make_syn_microdata(naics6df,numchunk,testsubset=False,outfoldername=os.getcw
         
         # for each row in subdata run 'get_establishments_from_one_naics6'
         # this command produces a series of dataframes (one for each naics6 by county code)
-        df_per_naics6_list = subdata.apply(get_establishments_from_one_naics6,axis=1)
+        df_per_naics6_list = subdata.apply(get_establishments_from_one_naics6, axis=1, args=(float(microdataConfig['GAM_SHAPE']),
+                                       float(microdataConfig['GAM_SCALE']),
+                                       float(microdataConfig['M2EMP_NOISECOEF']),
+                                       float(microdataConfig["WAGE_MIN"])))
         
         # turn the series of dataframes into a list of dataframes and stack them
         microdata = pd.concat(df_per_naics6_list.to_list())
@@ -330,14 +262,13 @@ def make_syn_microdata(naics6df,numchunk,testsubset=False,outfoldername=os.getcw
 # # print(type(np.random.dirichlet((1,2,3),2)))
 # # print(get_m1emp_estlevel(10,[0.2,0.3,0.35,0.15]))
 # #testdf = pd.DataFrame(data={"geoindkey":['1001_202201','2003_202301'],"state":[1,1],"cnty":[1,1],
-# #                          "geo4naics":["1001_2022","2003_2023"],"estnum":[64,25],"m1emp":[150,20],"m3emp":[65,25],"wage":[400000,100000]})
+# #                         "geo4naics":["1001_2022","2003_2023"],"estnum":[64,25],"m1emp":[150,20],"m3emp":[65,25],"wage":[400000,100000]})
 # #temp= make_syn_microdata(testdf, numchunk=1)
 # #print(temp.head())
-# #print(temp[["m1emp","m2emp","m3emp","wage"]].describe())
 # # testestdf = scale_one_naics6(testrow)
 # # print(testestdf)
 # # print(type([1.35,4.2,9.001]))
-# # print(get_m2emp_estlevel(testestdf[['m1emp','m3emp']]))
+
 
 
 # # print(np.random.dirichlet((1,1,1.1),4))

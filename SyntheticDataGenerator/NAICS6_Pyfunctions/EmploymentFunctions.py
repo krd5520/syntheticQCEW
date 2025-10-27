@@ -1,34 +1,28 @@
-import pandas as pd
-import numpy as np
 import re
-from sklearn.linear_model import LinearRegression
-from scipy.stats import norm
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import OLSInfluence
 from formulaic import Formula
-import patsy
-import yaml
 import sys
 import os
 sys.path.append(os.path.abspath('./'))
 from GeneralFunctions import *
-with open('./config.yaml','r') as configFile:
-    config = yaml.safe_load(configFile)
-    employmentConfig = config['employmentConfig']
+# with open('./config.yaml','r') as configFile:
+#     config = yaml.safe_load(configFile)
+#     employmentConfig = config['employmentConfig']
 pd.set_option('mode.chained_assignment', None)
 
-def get_m1emp_model(df): 
+def get_m1emp_model(df,employmentConfig):
     '''
     What is the point?
         get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
         predictors. This model is used when direct employment data is missing.
     Steps:
         1. Filters input data to include only rows where
-            - 'sEmpEnd' is not suppressed
+            - 'emp3_qwi_flag' is not suppressed
             - 'sEmp' is not supressed
             - 'ind_level' is not "A" 
         2. Initial model fitting
-            - Use formula specified in config.yaml (default: 'Emp ~ EmpEnd + estnum + C(sector) + C(state)')
+            - Use formula specified in config.yaml (default: 'Emp ~ emp3_qwi + estnum + C(sector) + C(state)')
               to construct the design matrix to fit an OLS model. (model_pre).
         3. Influential point/Outlier detection 
             - Compute Cook's distance for each observation and filter out observations where Cook's 
@@ -46,17 +40,19 @@ def get_m1emp_model(df):
             - Helpful Diagnostic
     '''
     # Step 1
+    # Retrieve OLS formula from config.yaml
+    formula=employmentConfig['OLS_FORMULA']
     subqwifull = df[
-        (~df["sEmpEnd"].isna()) & 
-        (df["sEmpEnd"].astype(float) != 5) &
-        (df["sEmp"].astype(float) != 5) &
+        (~df["emp3_qwi_flag"].isna()) & 
+        (df["emp3_qwi_flag"].astype(float) != 5) &
+        (df["emp1_qwi_flag"].astype(float) != 5) &
         (df["ind_level"] != "A")
     ].copy()
-    subqwifull["Emp"] = subqwifull["Emp"].astype(float)
-    subqwifull["EmpEnd"] = subqwifull["EmpEnd"].astype(float)
+    subqwifull["emp1_qwi"] = subqwifull["emp1_qwi"].astype(float)
+    subqwifull["emp3_qwi"] = subqwifull["emp3_qwi"].astype(float)
     subqwifull["estnum"] = subqwifull["estnum"].astype(float)
-    # Retrieve OLS formula from config.yaml
-    formula = employmentConfig['OLS_FORMULA']
+
+
     # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
     # and perform initial model fitting
     y_pre, X_pre = Formula(formula).get_model_matrix(subqwifull)
@@ -81,17 +77,17 @@ def get_m1emp_model(df):
     # end. return fitted model.
     return model
 
-def check_EmpS(empvals, stablevals, stableFlag):
+def check_lwbd_emp_qwi(empvals, stablevals, stableFlag):
     '''
     What is the point?
-        check_EmpS() is used as a helper function in get_m1emp() and get_m2emp().
+        check_lwbd_emp_qwi() is used as a helper function in get_m1emp() and get_m2emp().
         The purpose of this function is to choose whether or not to use predicted employment values or
-        the stable ones given as 'EmpS' in the dataset
+        the stable ones given as 'lwbd_emp_qwi' in the dataset
     Inputs:
         1. empvals  -  any array-like
             - Contains employment values to be checked
         2. stablevals  -  any array like
-            - Stable employment values for reference ('EmpS') from the dataset
+            - Stable employment values for reference ('lwbd_emp_qwi') from the dataset
         3. stableFlag  - any array-like
             - Suppression flags for stable values (1: not suppressed, NaN / \neq 1: suppressed )
     Steps:
@@ -111,7 +107,7 @@ def check_EmpS(empvals, stablevals, stableFlag):
     empvals[~empfitokay] = stablevals[~empfitokay]
     return empvals
 
-def get_m1emp(df, m1empmodel, rseed=employmentConfig['RSEED'], include_indicator=False):
+def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     '''
     What is the point?
         get_m1emp() is used as a helper function in get_employmentCounts4().
@@ -134,7 +130,7 @@ def get_m1emp(df, m1empmodel, rseed=employmentConfig['RSEED'], include_indicator
             - Add normally distributed noise scaled by SEs
         4. Correction:
             - Ensures no negative employment
-            - Cross-checks with stable values using check_EmpS()
+            - Cross-checks with stable values using check_lwbd_emp_qwi()
         5. Output prep:
             - Rounds results to whole numbers
             - Optionally appends imputation indicator.
@@ -147,9 +143,9 @@ def get_m1emp(df, m1empmodel, rseed=employmentConfig['RSEED'], include_indicator
     '''
     if rseed is not None:
         np.random.seed(rseed)
-    m1emp = df["Emp"]
+    m1emp = df["emp1_qwi"]
     # Identify rows to be imputed
-    missm1indicator = df["sEmp"] != 1.0
+    missm1indicator = df["emp1_qwi_flag"] != 1.0
     missingsub = df[missm1indicator]
     # Get model predictions and standard errors for missing values
     predm1emp, sem1emp= custom_predict(missingsub, m1empmodel)
@@ -161,7 +157,7 @@ def get_m1emp(df, m1empmodel, rseed=employmentConfig['RSEED'], include_indicator
     )
     # Ensure no negative employment and validate against stable values
     m1empfit[m1empfit < 0] = 0
-    m1emp[missm1indicator] = check_EmpS(m1empfit, missingsub["EmpS"], missingsub["sEmpS"])
+    m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"], missingsub["lwbd_emp_qwi_flag"])
     # Round to whole numbers
     output = np.round(m1emp.astype(float), 0)
     # Optionally include imputation indicatior 
@@ -169,7 +165,7 @@ def get_m1emp(df, m1empmodel, rseed=employmentConfig['RSEED'], include_indicator
         output = np.column_stack((output, missm1indicator))
     return output
 
-def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=employmentConfig['RSEED']):
+def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=None):
     '''
     What is the point?
         get_m1emp() is used as a helper function in get_employmentCounts4().
@@ -198,7 +194,7 @@ def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=employmentConfig['R
             - Add noise
         4. Correct
             - Ensure non negative values
-            - Cross-checks with stable values using check_EmpS()
+            - Cross-checks with stable values using check_lwbd_emp_qwi()
             - Round output to whole number
     Returns:
         m2emp  -  np.ndarray of floats (if include_indicator=False)
@@ -220,13 +216,13 @@ def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=employmentConfig['R
     changeFromMid = np.random.normal(0, noisesd)
     m2emp_nz = m1emp_nz + ((m3emp_nz - m1emp_nz) / 2) + changeFromMid
     m2emp[nonzeroindic] = m2emp_nz
-    #Handle negative values and consult check_EmpS()
+    #Handle negative values and consult check_lwbd_emp_qwi()
     m2emp[m2emp < 0] = np.where((m1emp[m2emp < 0] == 0) | (m3emp[m2emp < 0] == 0), 0, 1)
-    m2emp = check_EmpS(m2emp, stabval, stabF)
+    m2emp = check_lwbd_emp_qwi(m2emp, stabval, stabF)
     #return
     return np.round(m2emp, 0)
 
-def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=employmentConfig['RSEED'], include_m1emp_indicator=False):
+def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_m1emp_indicator=False):
     '''
     What is the point?
         Putting everything together adjust_countytotal_qwi() generates the complete 
@@ -251,14 +247,14 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=employmentConf
     '''
     if rseed is not None:
         np.random.seed(rseed)
-    qwiEmpEndAvailable = ~df4["EmpEnd"].isna()
-    df4.loc[~qwiEmpEndAvailable, "EmpEnd"] = df4.loc[~qwiEmpEndAvailable, "emp"]
+    qwiemp3_qwiAvailable = ~df4["emp3_qwi"].isna()
+    df4.loc[~qwiemp3_qwiAvailable, "emp3_qwi"] = df4.loc[~qwiemp3_qwiAvailable, "emp"]
     if include_m1emp_indicator:
         m1empAndFlag = get_m1emp(df=df4, m1empmodel=m1emp_model, include_indicator=True)
         m1emp = m1empAndFlag[:, 0]  # First column (m1emp values)
         m1empFlag = m1empAndFlag[:, 1]  # Second column (m1empFlag)
-    m3emp=df4['EmpEnd']
-    m2emp = get_m2emp(m1emp, m3emp, df4['EmpS'].values, df4['sEmpS'].values, noisecoef=m2emp_noisecoef)
+    m3emp=df4['emp3_qwi']
+    m2emp = get_m2emp(m1emp, m3emp, df4['lwbd_emp_qwi'].values, df4['lwbd_emp_qwi_flag'].values, noisecoef=m2emp_noisecoef)
     empMat = pd.DataFrame({
     'geoindkey': df4['geoindkey'],
     'm1emp': m1emp,
@@ -284,9 +280,9 @@ def adjust_countytotal_qwi(valdf, sumdf):
     sumdf = sumdf.copy()
     # Extract county codes from sumdf(eg. '11111' from '11111_XXXXXX')
     sumdf["stcnty"] = sumdf["geoindkey"].apply(lambda x: re.sub(r"_.*", "", x))
-    sumdf = sumdf[["stcnty", "Emp", "sEmp"]] 
+    sumdf = sumdf[["stcnty", "emp1_qwi", "emp1_qwi_flag"]]
     # Filter to counties with non-suppressed totals
-    HasSumIndic = sumdf["sEmp"].astype(float) == 1.0
+    HasSumIndic = sumdf["emp1_qwi_flag"].astype(float) == 1.0
     groupdf = valdf.copy()
     # Extract county codes from valdf
     groupdf["stcnty"] = groupdf["geoindkey"].apply(lambda x: re.sub(r"_.*", "", x))
@@ -324,12 +320,12 @@ def adjust_countytotal_qwi(valdf, sumdf):
     # Merge with official county totals
     mergedf = pd.merge(
         groupdf, 
-        sumdf.loc[HasSumIndic].drop(columns=['sEmp']),  
+        sumdf.loc[HasSumIndic].drop(columns=['emp1_qwi_flag']),
         on='stcnty', 
         how='outer'
     )
     # ModelTotal: Target total for imputed records (official total - QWI_Emp)
-    mergedf['ModelTotal'] = mergedf['Emp'].astype(float) - mergedf['QWI_Emp']
+    mergedf['ModelTotal'] = mergedf['emp1_qwi'].astype(float) - mergedf['QWI_Emp']
     # MissingModel: Residual to distribute among imputed records
     mergedf['MissingModel'] = mergedf['ModelTotal'] - mergedf['Model']
         # Merge discrepancies back into original industry-level data

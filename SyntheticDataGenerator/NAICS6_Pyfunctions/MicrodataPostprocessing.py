@@ -4,29 +4,16 @@ import numpy as np
 import re
 from pathlib import Path
 import yaml
-with open('./config.yaml', 'r') as configFile:
-    config = yaml.safe_load(configFile)
-    postprocessingConfig = config['postprocessingConfig']
-    generalConfig=config['generalConfig']
+# with open('./config.yaml', 'r') as configFile:
+#     config = yaml.safe_load(configFile)
+#     postprocessingConfig = config['microdataConfig']
+#     generalConfig=config['generalConfig']
+#
 
-inputpath = Path(postprocessingConfig['INPATH'])
-outputpath = Path(postprocessingConfig['OUTPATH']) 
 
-# Crosswalk file from 
-## https://www.bls.gov/cew/classifications/industry/industry-supersectors.htm 
-crosswalk_file = postprocessingConfig['CROSSWALK']
-state_file = postprocessingConfig['FIPS_STATE_FILE']
 
-state_abbr = {
-    "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de", 
-    "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks", 
-    "21": "ky", "22": "la", "23": "me", "24": "md", "25": "ma", "26": "mi", "27": "mn", "28": "ms", "29": "mo", 
-    "30": "mt", "31": "ne", "32": "nv", "33": "nh", "34": "nj", "35": "nm", "36": "ny", "37": "nc", "38": "nd", 
-    "39": "oh", "40": "ok", "41": "or", "42": "pa", "44": "ri", "45": "sc", "46": "sd", "47": "tn", "48": "tx", 
-    "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
-}
 
-def get_xwalk_naics(crosswalk_file=crosswalk_file):
+def get_xwalk_naics(crosswalk_file):
     """
     Reads and processes the NAICS crosswalk file.
     
@@ -137,7 +124,7 @@ def postprocess_est_microdata_split(filename, yr, qtr, xwalk=None):
     
     return estdf
 
-def combine_and_split_iterative(yr, qtr, filebasename="SynMicrodata", folder=inputpath, outdir=outputpath):
+def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynMicrodata"):
     """
     Processes SynMicrodata files one by one, assigns primary keys,
     and writes each state's subset to its corresponding file.
@@ -158,15 +145,36 @@ def combine_and_split_iterative(yr, qtr, filebasename="SynMicrodata", folder=inp
                    - Otherwise, create a new file with the header.
     5. Print a message when all files have been processed.
     """
+    folder = Path(postprocessingConfig['SUBSET_OUTPATH'])
+    outdir = Path(postprocessingConfig['OUTPATH'])
+    # Crosswalk file from
+    ## https://www.bls.gov/cew/classifications/industry/industry-supersectors.htm
+    crosswalk_file = postprocessingConfig['CROSSWALK']
+    #state_file = postprocessingConfig['FIPS_STATE_FILE']
+
+    state_abbr = {
+        "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
+        "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
+        "21": "ky", "22": "la", "23": "me", "24": "md", "25": "ma", "26": "mi", "27": "mn", "28": "ms", "29": "mo",
+        "30": "mt", "31": "ne", "32": "nv", "33": "nh", "34": "nj", "35": "nm", "36": "ny", "37": "nc", "38": "nd",
+        "39": "oh", "40": "ok", "41": "or", "42": "pa", "44": "ri", "45": "sc", "46": "sd", "47": "tn", "48": "tx",
+        "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
+    }
     # Get numerically sorted list of files
     filenames = list(Path(folder).glob(f"{filebasename}*.csv"))
     filenames_sorted = sorted(filenames, key=lambda x: int(re.search(r'\d+', x.stem).group()))
     
     # Get the cleaned crosswalk
-    crosswalk = get_xwalk_naics()
+    crosswalk = get_xwalk_naics(crosswalk_file)
     
     # Ensure the overall output directory exists
-    outdir.mkdir(parents=True, exist_ok=True)
+    if os.path.exists(outdir):
+        if os.path.isdir(outdir):
+            pass  # good
+        else:
+            raise Exception(f"Error: file {outdir} should be a directory.")
+    else:
+        os.makedirs(outdir)
     
     # Running counter for primary key assignment
     primary_key_counter = 1

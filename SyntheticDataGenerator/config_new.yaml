@@ -1,0 +1,43 @@
+generalConfig:
+  SEED: 1
+  API_KEY: "912ebc938d348a811445ed26ac8f97b22d57e7ff"
+  YEAR: 2017
+  QTR: 1
+  SKIP_TO_MICRODATA: False #if true, the county by NAICS6 data will be read in from NAICS6_PATH. Otherwise it will be made
+  NAICS6_PATH: "DataDiag/NAICS6Data.csv"
+
+preprocessConfig: #if SKIP_TO_MICRODATA is True, then this section is not necessary and will be ignored.
+  DATA_IN_FOLDER: "DataDiag/DataIn/"
+  CBPDIR: "CBPdataRAW/"
+  CBPDATA: "CBPdataRAW/cbp16co.txt"
+  QWIDATA: "QWIdata/"
+  OUTPATH: "DataDiag/PythonPreprocessOut/"
+
+getNAICS6Config: #if SKIP_TO_MICRODATA is True, then this section will be ignored.
+  FUNCTIONSDIR: "./NAICS6_Pyfunctions/"
+  DATASET: "DataDiag/PythonPreprocessOut/combineQWIandCBP.csv"
+
+employmentConfig: #if SKIP_TO_MICRODATA is True, then this section is not necessary and will be ignored.
+  OLS_FORMULA: "Emp ~ EmpEnd + estnum + C(sector) + C(state)"
+  M2EMP_NOISECOEF: 1.69
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
+  OUTLIER_THRESH: 4.3 # Threshold for outliers using studentized residuals (4.3 chosen to filter out 0.3% of the dataset.)
+  RSEED: 5 # This RSEED is for employment imputation
+
+wageConfig: #if SKIP_TO_MICRODATA is True, then this section will be ignored. If using 2017 and newer data, no wage imputation model need
+  OLS_FORMULA: "sqrt_wagediff ~ wageCBP_missing6by4*m3emp+poly(m3emp, degree=3)+C(sector)+C(state)"
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
+  OUTLIER_THRESH: 6.7 # Threshold for outliers using studentized residuals (6.7 chosen to filter out 0.3% of the dataset.)
+
+
+microdataConfig:
+  ## Dirichlet Prior parameters:
+  EST_SEED: 1 #This is the seed for the microdata generation
+  GAM_SHAPE: 3 #10
+  GAM_SCALE: 20 #200
+  M2EMP_NOISECOEF: 1.69
+  WAGE_MIN: 3 #in thousands 
+  NUMCHUNK: 35 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
+  SUBSET_OUTPATH: "DataDiag/PythonMicrodataSubsets/"
+  CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
+  OUTPATH: "./FinalMicrodata"
