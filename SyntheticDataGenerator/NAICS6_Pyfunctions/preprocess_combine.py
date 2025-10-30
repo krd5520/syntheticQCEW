@@ -563,7 +563,7 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
         combinedf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
         combinedf['cnty'] = combinedf['cnty'].astype("str")
         combinedf['ind_level'] = combinedf['ind_level'].astype("str")
-        qcew = pd.read_csv(preprocessConfig["QCEWDIR"] + "qcew_part.csv")
+        qcew = pd.read_csv(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig["QCEWDIR"] + "qcew_part.csv")
         fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig)
         if outfilepath in outfilename:
             fullcombine.to_csv(outfilename)

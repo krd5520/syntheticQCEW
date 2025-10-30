@@ -104,9 +104,9 @@ def download_QCEW(generalConfig, preprocessConfig,savechunks=2,forcombine=False)
 
     year=generalConfig["YEAR"]
     qtr=generalConfig['QTR']
-    if not os.path.exists(preprocessConfig['QCEWDIR']):
-        os.mkdir(preprocessConfig['QCEWDIR'])
-    savefile=preprocessConfig['QCEWDIR']+"qcew_part"
+    if not os.path.exists(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig['QCEWDIR']):
+        os.mkdir(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig['QCEWDIR'])
+    savefile=preprocessConfig['DATA_IN_FOLDER']+preprocessConfig['QCEWDIR']+"qcew_part"
     if states is not None and len(states)>0: #if specified certain states, subset fips to relevant ones
         stateselector=pd.Series([False]*len(fipsdf))
         for st in states:
