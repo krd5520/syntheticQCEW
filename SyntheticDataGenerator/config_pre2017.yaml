@@ -5,7 +5,7 @@ generalConfig: ## This section is used generally throughout the process.
   QTR: 1 #quarter for the data
   STATES: ["AL","PA","NJ","RI","CA","IN","OH","NM"] #Optional to select a subset of states. 
   SKIP_TO_MICRODATA: False #If FALSE, County by NAICS-6 data will be generated.
-  COMBINED_DATA: "DataDiag/PythonPreprocessOut/combineFull.csv" 
+  COMBINED_DATA: "DataDiag/PythonPreprocessOut/combine_data.csv" 
   NAICS6_FILE: "DataDiag/NAICS6Data.csv" 
   FIPS_STATE_FILE: "DataDiag/FIPSstatecodename.txt" #comma-sep file of FIPS state codes and names
   FULL_FIPS_FILE: "DataDiag/FIPSareacode_full.csv" #optional to download QCEW data.

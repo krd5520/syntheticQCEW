@@ -211,7 +211,7 @@ def preprocess_rawCBPcnty(raw,supptab=False,suppressionflags=["S", "D"]):
 #       if imputedf is not provided it is assumed that rawdf have complete emp
 #       onlyraw indicates if only rawdf is used, supptab indicates if suppression table should be outputted
 # OUTPUT: pd.dataframe of CBP data with employment inputted and Q1 wages possibly suppressed.
-def combine_CBP_raw_imputed(rawdf,imputedf=None,states=None, onlyraw=False,supptab=False):
+def combine_CBP_raw_imputed(rawdf,imputedf=None,generalConfig=None, onlyraw=False,supptab=False):
     #preprocess the dataframes
     if imputedf is None or onlyraw:
         if supptab:
@@ -472,7 +472,7 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
 
     # combine imputted and raw
     if printdiagnostics:
-        cbp, supptabCBP = combine_CBP_raw_imputed(raw,imputeCBP,states=qwi['state'].unique(),onlyraw=onlyraw,supptab=printdiagnostics)
+        cbp, supptabCBP = combine_CBP_raw_imputed(raw,imputeCBP,generalConfig=generalConfig,onlyraw=onlyraw,supptab=printdiagnostics)
     else:
         cbp = combine_CBP_raw_imputed(raw,imputeCBP,onlyraw=onlyraw)
 
@@ -711,26 +711,26 @@ def quarter_adjustment(data,generalConfig,response,quarterConfig=None,formula=No
 
 # # # test code
 # # #
-with open('config_pre2017.yaml', 'r') as configFile:
-     config = yaml.safe_load(configFile)
-preprocessConfig = config['preprocessConfig']
-generalConfig = config['generalConfig']
-
-foldername = preprocessConfig['DATA_IN_FOLDER']
+#with open('config_pre2017.yaml', 'r') as configFile:
+#     config = yaml.safe_load(configFile)
+#preprocessConfig = config['preprocessConfig']
+#generalConfig = config['generalConfig']
+#
+#foldername = preprocessConfig['DATA_IN_FOLDER']
 #
 #generalConfig["QCEWDIR"]=None
-temp=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
-                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
-                   qwifolder=foldername + preprocessConfig['QWIDIR'],
-                     generalConfig=generalConfig,
-                          preprocessConfig=preprocessConfig,
-                   outfilename=generalConfig['COMBINED_DATA'],
-                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
-                   outfilepath = preprocessConfig['OUTPATH'],
-                year=generalConfig['YEAR'])
+#temp=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
+#                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
+#                   qwifolder=foldername + preprocessConfig['QWIDIR'],
+#                     generalConfig=generalConfig,
+#                          preprocessConfig=preprocessConfig,
+#                   outfilename=generalConfig['COMBINED_DATA'],
+#                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
+#                   outfilepath = preprocessConfig['OUTPATH'],
+#                year=generalConfig['YEAR'])
 
 #print(temp.loc[:,].sort_values(by='geoindkey').head(20))
 #print(temp.loc[:,].sort_values(by='geoindkey').tail(10))
-print(temp.columns)
-print(temp.head())
+#print(temp.columns)
+#print(temp.head())
 # # #

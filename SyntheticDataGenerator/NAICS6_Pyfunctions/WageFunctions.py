@@ -132,7 +132,7 @@ def get_wagemax(codes4naics, fulldf):
     outdf = outdf.drop(columns=['wage_naics2'])
     fulldf['wages_cbp']=fulldf['wages_cbp'].astype(int)
     # For remaining missing values, use county-wide totals
-    max_allind_allcounty = fulldf[fulldf['ind_level'] == '4']['wages_cbp'].max(skipna=True)
+    max_allind_allcounty = fulldf[fulldf['agglvl_code'] == 76]['wages_cbp'].max(skipna=True)
     notmaxcodes = outdf[outdf['maxwage'].isna()]['geography'].tolist()
     tomergedfall = fulldf.copy()
     tomergedfall['geography'] = tomergedfall['geoindkey'].str[:-7]

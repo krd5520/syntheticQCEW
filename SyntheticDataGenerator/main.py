@@ -65,7 +65,7 @@ def start(config):
                                       forcombine=True)
                         print("download qcew")
                     if os.listdir(foldername+preprocessConfig['QCEWDIR'])==[]:
-                        print("acew didn't save properly???")
+                        print("qcew didn't save properly???")
                         qcew.to_csv(foldername+preprocessConfig['QCEWDIR'])
                 readinData = time.time() - startime
             else:

@@ -46,7 +46,7 @@ def get_m1emp_model(df,employmentConfig):
         (~df["emp3_qwi_flag"].isna()) & 
         (df["emp3_qwi_flag"].astype(float) != 5) &
         (df["emp1_qwi_flag"].astype(float) != 5) &
-        (df["ind_level"] != "A")
+        ((df["agglvl_code"] != 71)|(df['agglvl_code']!=51))
     ].copy()
     subqwifull["emp1_qwi"] = subqwifull["emp1_qwi"].astype(float)
     subqwifull["emp3_qwi"] = subqwifull["emp3_qwi"].astype(float)
