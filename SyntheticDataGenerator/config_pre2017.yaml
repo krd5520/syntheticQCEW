@@ -1,5 +1,4 @@
-## This section is used generally throughout the process.
-generalConfig:
+generalConfig: ## This section is used generally throughout the process.
   SEED: 1
   API_KEY: "0a71b2828ce455dbb120cebbb499b0b5bec91962" #optional to download census data from api
   YEAR: 2016 #year of the data
@@ -25,9 +24,7 @@ preprocessConfig:
 
 ## For imputation of QCEW missing tabulations for quarters 2,3,or 4 using quarter 1 CBP
 quarterConfig:
-  MODEL_WAGE_FILE: "DataDiag/ModelData/quarter_prediction_wage.csv" #optional file location for complete data to fit model
   WAGE_OLS_FORMULA: "wages ~ wages +C(wages_cbp_flag)+C(wages_source)+emp3+ estnum + C(sector) + C(state)"
-  MODEL_EMP_FILE: "DataDiag/ModelData/quarter_prediction_emp.csv" #optional
   EMP_OLS_FORMULA: "month3_emplvl ~ emp +qp1+qtrly_estabs+C(qp1_nf)+ C(sector) + C(state)"
   COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
   OUTLIER_THRESH: 4.3 # Threshold for outliers using studentized residuals (4.3 chosen to filter out 0.3% of the dataset.)
@@ -35,7 +32,6 @@ quarterConfig:
 
 ## For imputation of County by NAICS-4 monthly employment
 employmentConfig:
-  MODEL_DATA_FILE: "DataDiag/ModelData/emp1_prediction.csv" #optional file location for complete data to fit model
   OLS_FORMULA: "emp1 ~ emp3 + estnum + C(sector) + C(state)+C(emp3_source)"
   M2EMP_NOISECOEF: 1.69
   COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
@@ -44,7 +40,6 @@ employmentConfig:
 
 ## For imputation of County by NAICS-4 monthly quarterly wages
 wageConfig:
-  MODEL_DATA_FILE: "DataDiag/ModelData/emp1_prediction.csv" #optional file location for complete data to fit model
   OLS_FORMULA: "sqrt_wagediff ~ wageCBP_missing6by4*emp3+poly(emp3, degree=3)+C(sector)+C(state)+C(wage_source)"
   COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
   OUTLIER_THRESH: 6.7 # Threshold for outliers using studentized residuals (6.7 chosen to filter out 0.3% of the dataset.)

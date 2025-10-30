@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath("./NAICS6_Pyfunctions/"))
 from hierarchy_geoindkey import *
 from GeneralFunctions import *
+from investigate_preprocess import *
 
 pd.set_option("display.max_columns", None)
 pd.options.mode.copy_on_write = True
@@ -241,7 +242,21 @@ def combine_CBP_raw_imputed(rawdf,imputedf=None,states=None, onlyraw=False,suppt
                 print(problemdf.head())
             cbpdf=cbpdf[cbpdf['state'].isin(both_or_ronly_states)]
         print("States in CBP raw: "+", ".join(both_or_ronly_states))
-
+        state_abbr = {
+            "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
+            "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
+            "21": "ky", "22": "la", "23": "me", "24": "md", "25": "ma", "26": "mi", "27": "mn", "28": "ms", "29": "mo",
+            "30": "mt", "31": "ne", "32": "nv", "33": "nh", "34": "nj", "35": "nm", "36": "ny", "37": "nc", "38": "nd",
+            "39": "oh", "40": "ok", "41": "or", "42": "pa", "44": "ri", "45": "sc", "46": "sd", "47": "tn", "48": "tx",
+            "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
+        }
+        states = state_abbr.keys()
+        if "STATES" in generalConfig and generalConfig['STATES'] is not None:
+            if "ALL" not in generalConfig["STATES"]:
+                states = generalConfig["STATES"]
+                if states[0] not in state_abbr.keys():
+                    states = [str(int(key)) for key, value in state_abbr.items() if value.upper() in states]
+                cbpdf = cbpdf.loc[cbpdf['state'].isin(states), :].copy()
 
         emp_impute_naI=cbpdf["emp"].isna()
         emp_raw_naI=cbpdf['emp_raw'].isna()
@@ -275,12 +290,6 @@ def combine_CBP_raw_imputed(rawdf,imputedf=None,states=None, onlyraw=False,suppt
             new_raw_misscount=sum(cbpdf['_merge'] == "right_only")
             # #Note some columns appear in raw but not imputed.
             print("After adjustments, in rawCBP but not impute: "+str(raw_misscount))
-    if "lb" in cbpdf.columns and "emp" in cbpdf.columns:
-        checkbounds=cbpdf.loc[(cbpdf['emp']<=cbpdf['lb'])&(cbpdf['emp']>=cbpdf['ub']),:]
-        if len(checkbounds)>0:
-            print("Checking the bounds... There are " + str(
-                len(checkbounds)) + " rows where the emp is outside the bounds.")
-            #print(checkbounds.head())
 
     #unify column names
     cbpdf['_merge']=cbpdf['_merge'].str.replace('left_only','impute')
@@ -300,7 +309,7 @@ def combine_CBP_raw_imputed(rawdf,imputedf=None,states=None, onlyraw=False,suppt
 # INPUT: pd.dataframe of QWI data should contain columns:
 #       Emp,EmpEnd,EmpS,EarnHirAS,EarnBeg, industry, geography, year, quarter
 # OUTPUT: pd.dataframe with unique key and reduced to key columns
-def preprocess_qwi(qwi):
+def preprocess_qwi(qwi,generalConfig):
     #drop unneccessary columns (come with all downloads of QWI data from US Census site)
     qwi = qwi.drop(columns=['periodicity','seasonadj','agegrp','race','ethnicity','education',
               'sex','ownercode','firmage','firmsize','version'],errors='ignore')
@@ -318,6 +327,22 @@ def preprocess_qwi(qwi):
 
     # make unique indentifier
     qwi['geoindkey'] = qwi['geography']+"_"+qwi['industry']
+    qwi['state']=qwi['geography'].astype(str).str.slice(start=0,stop=-3)
+    state_abbr = {
+        "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
+        "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
+        "21": "ky", "22": "la", "23": "me", "24": "md", "25": "ma", "26": "mi", "27": "mn", "28": "ms", "29": "mo",
+        "30": "mt", "31": "ne", "32": "nv", "33": "nh", "34": "nj", "35": "nm", "36": "ny", "37": "nc", "38": "nd",
+        "39": "oh", "40": "ok", "41": "or", "42": "pa", "44": "ri", "45": "sc", "46": "sd", "47": "tn", "48": "tx",
+        "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
+    }
+    states = state_abbr.keys()
+    if "STATES" in generalConfig and generalConfig['STATES'] is not None:
+            if "ALL" not in generalConfig["STATES"]:
+                states = generalConfig["STATES"]
+                if states[0] not in state_abbr.keys():
+                    states=[str(int(key)) for key,value in state_abbr.items() if value.upper() in states]
+                qwi=qwi.loc[qwi['state'].isin(states),:].copy()
     #if forcombine:
     #    qwi.drop(columns=['industry','geography'],axis=1,inplace=True)
     return(qwi)
@@ -326,7 +351,7 @@ def preprocess_qwi(qwi):
 ##  (my file names have been manually changes to reflect "co" for county level, and "st" for state level
 # INPUT: str which is the path to the folder including QWI data files
 # OUTPUT: pd.dataframe with all qwi county files (labeled with "co" in file name) preprocessed and combined.
-def read_qwi_co(folderpath):
+def read_qwi_co(folderpath,generalConfig):
     lsdf = [] #initialize list
 
     fileexists=False
@@ -336,7 +361,7 @@ def read_qwi_co(folderpath):
         if "co" in file:
             fileexists=True
             df = pd.read_csv(folderpath+str(file))
-            df = preprocess_qwi(df)
+            df = preprocess_qwi(df,generalConfig)
             dfnew = df.loc[df['geo_level']=="C"] #make sure this is just county data
             lsdf.append(dfnew)
     if not fileexists:
@@ -381,7 +406,7 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
     onlyraw=False
     if diagnosticsfile is not None:
         printdiagnostics=True
-    qwi = read_qwi_co(qwifolder)  # read all qwi county files
+    qwi = read_qwi_co(qwifolder,generalConfig)  # read all qwi county files
     qwi=qwi.loc[qwi['state'].isin(allowedstates),:]
 
     #print(qwi.columns)
@@ -452,7 +477,11 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
         cbp = combine_CBP_raw_imputed(raw,imputeCBP,onlyraw=onlyraw)
 
     #cbp=cbp.loc[cbp['state'].isin(allowedstates),:]
-    cbp['qtr_cbp']=1.0
+    if generalConfig['QTR']==4:
+        cbp['year_qtr_cbp']=float(generalConfig['YEAR'])+1.25
+    else:
+        cbp['year_qtr_cbp'] = float(generalConfig['YEAR']) + 0.25
+
 
 
     #combine QWI and CBP
@@ -505,7 +534,7 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
         xtabQWI.to_csv(outfilepath+diagnosticsfile,sep=",",mode="a")
 
     combinedf = combinedf.drop(columns=['_merge','_merge_rawimpute'])
-    combinedf=fill_from_geoindkey(combinedf)
+    #combinedf=fill_from_geoindkey(combinedf)
     combinedf['year']=generalConfig["YEAR"]
 
     #fill when lb and ub
@@ -520,14 +549,15 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
                               "EarnBeg":"avg_month_emp_wage",
                               "sEarnBeg":"avg_month_emp_wage_flag"}, inplace=True)
     if "QCEWDIR" not in preprocessConfig or preprocessConfig["QCEWDIR"] is None:
+        combinedf = fill_from_geoindkey(combinedf)
         combinedf=combinedf[combinedf['estnum'].notna()]
-        combinedf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
         combinedf['cnty'] = combinedf['cnty'].astype("str")
         combinedf['ind_level'] = combinedf['ind_level'].astype("str")
         if outfilepath in outfilename:
             combinedf.to_csv(outfilename)
         else:
             combinedf.to_csv(outfilepath + outfilename)
+        fullcombine=combinedf.copy()
 
     else:
         combinedf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
@@ -539,7 +569,7 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
             fullcombine.to_csv(outfilename)
         else:
             fullcombine.to_csv(outfilepath + outfilename)
-    return(combinedf)
+    return(fullcombine)
 
 def qcew_format_geoindkey(data_row): #for QCEW
     naics_code=str(data_row['industry_code'])
@@ -555,8 +585,8 @@ def qcew_format_geoindkey(data_row): #for QCEW
 def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_agglvl=True):
     if remove_xtra_agglvl:
         keepagglvls=combine['agglvl_code'].unique()
-        print("Only keeping QCEW aggregate level codes in CBP/QWI combined data :"+', '.join([str(x) for x in keepagglvls]))
-        data=data[data['agglvl_code'].isin(keepagglvls)]
+        print("Only keeping QCEW aggregate level codes in CBP/QWI combined data :"+', '.join([str(int(x)) for x in keepagglvls]))
+        data=data[data['agglvl_code'].astype(float).isin(keepagglvls)]
     data=data.apply(qcew_format_geoindkey,axis=1)
     #prepare combine data for merging
     #combine.drop(columns=['year','qtr'],inplace=True)
@@ -567,11 +597,17 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_ag
     data.rename(columns={"month1_emplvl": "emp1_qcew","month2_emplvl": "emp2_qcew","month3_emplvl": "emp3_qcew",
                               "total_qtrly_wages": "wages_qcew",
                               "qtrly_estabs": "estnum_qcew"}, inplace=True)
-    #data=fill_from_geoindkey(data,numeric_ind_level=True)
+    data=fill_from_geoindkey(data,numeric_ind_level=True)
     #combine['cnty']=combine['cnty'].astype("str")
     #combine['state'] = combine['state'].astype("str")
     #combine['geography'] = combine['geography'].astype("str")
-    colscomb=np.intersect1d(np.array(data.columns.values), np.array(combine.columns.values)).tolist()
+    geoindkey_inter=set(np.intersect1d(np.array(data['geoindkey'].str.slice(start=0,stop=5)), np.array(combine['geoindkey'].str.slice(start=0,stop=5))).tolist())
+    combine.drop(columns={'ind_level','industry','state','cnty','geography','agglvl_code'},inplace=True)
+
+    colscomb = np.intersect1d(np.array(data.columns.values), np.array(combine.columns.values)).tolist()
+    colscomb=[x for x in colscomb if x in ["year","qtr","geoindkey"]]
+    combine.loc[combine['qtr'].isna(),'qtr']=generalConfig['QTR']
+
     #print(combine.dtypes)
     #print(data.dtypes)
     melddf = data.merge(combine, how="outer",
@@ -579,14 +615,13 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_ag
                           indicator=True, suffixes=["_qcew", "_other"], validate="one_to_one")
     melddf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
     melddf=fill_from_geoindkey(melddf,numeric_ind_level=True)
-    melddf.drop(columns=["area_fips","industry_code"])
 
     melddf["_merge"] = melddf["_merge"].cat.rename_categories(
         {'right_only': 'cbp_qwi_only', 'left_only': 'qcew_only', "both": "both"})
     #melddf=data.merge(combine,how="outer",on=["geoindkey","geoindkey"],indicator=True,suffixes=["_combine","_qcew"],validate="one_to_one")
     if preprocessConfig['DIAGNOSTIC_FILE'] is not None:
         print("Adding diagnostic information to "+preprocessConfig["DIAGNOSTIC_FILE"])
-        temp=melddf
+        temp=melddf.copy()
         temp['cat']=temp['_merge'].astype(str)
         temp.loc[(temp['cat']=="qcew_only")&(temp['industry'].isin(excluded_cbp)),'cat']="qcew_only_excluded_cbp"
         xtabs=pd.crosstab(temp["agglvl_code"], temp["cat"])
@@ -596,9 +631,10 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_ag
             print("--" * 20, file=f)
             print("Note the following NAICS codes are not included in CBP data: "+", ".join(excluded_cbp))
         xtabs.to_csv(preprocessConfig['OUTPATH'] + preprocessConfig["DIAGNOSTIC_FILE"],sep=",",mode="a")
+    melddf.drop(columns=["area_fips","industry_code","geo_level","ind_level",'_merge'],inplace=True)
     return(melddf)
 
-def quarter_adjustment(data,generalConfig,quarterConfig):
+def quarter_adjustment(data,generalConfig,response,quarterConfig=None,formula=None):
         '''
         What is the point?
             get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
@@ -627,276 +663,47 @@ def quarter_adjustment(data,generalConfig,quarterConfig):
                 - Helpful Diagnostic
         '''
         # Step 1
-        # Retrieve OLS formula from config.yaml
-        formula="emp3_qcew"
-        subqwifull = df[
-            (~df["sEmpEnd"].isna()) &
-            (df["sEmpEnd"].astype(float) != 5) &
-            (df["sEmp"].astype(float) != 5) &
-            (df["ind_level"] != "A")
-            ].copy()
-        subqwifull["Emp"] = subqwifull["Emp"].astype(float)
-        subqwifull["EmpEnd"] = subqwifull["EmpEnd"].astype(float)
-        subqwifull["estnum"] = subqwifull["estnum"].astype(float)
+        # get difference of quarters
+        tempdata=data.copy()
+        tempdata['year_qtr']=tempdata['year']+tempdata['qtr'].astype(float).multiply(0.25)
+        tempdata['year_qtr_diff'] = tempdata['year_qtr_cbp'].astype(float) - tempdata['year_qtr'].astype(float)
 
-        # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
+        if tempdata['year_qtr'].nunique()>1:
+            formula_stem=response+"~year_qtr_diff+qtr*naics2+"
+        else:
+            formula_stem=response+"~"
+
+        # Retrieve OLS formula from config.yaml if quarterConfig exists
+        if quarterConfig is not None and formula is None:
+            if response=="wages_qcew":
+                formula=quarterConfig['WAGE_OLS_FORMULA']
+            else:
+                formula=quarterConfig['EMP_OLS_FORMULA']
+        elif formula is None:
+            formula=formula_stem+"wages_cbp*wages_cbp_flag+np.log(estnum_cbp)+np.log(estnum)+emp3_cbp+emp3_cbp_flag+agglvl_code+agglvl_code*naics2"
+
+        for vname in ["year","wages_cbp","estnum_cbp","estnum","wages_qcew","emp1_qcew","emp2_qcew","emp3_qcew","emp3_cbp"]:
+            tempdata[vname]=tempdata[vname].astype(float)
+        for vname in ['qtr','qtr_cbp','wages_cbp_flag',"emp3_cbp_flag","agglvl_code","naics2","naics3","naics4","naics5"]:
+            tempdata[vname]=tempdata[vname].astype("category")
+        subdata = tempdata[
+            (~tempdata['wages_cbp'].isna()) & (~tempdata['wages_qcew'].isna()) & (~tempdata['emp3_cbp'].isna())].copy()
+
+# Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
         # and perform initial model fitting
-        y_pre, X_pre = Formula(formula).get_model_matrix(subqwifull)
-        model_pre = sm.OLS(y_pre, X_pre).fit()
+        y_pre, X_pre = Formula(formula).get_model_matrix(subdata)
+        model = sm.OLS(y_pre, X_pre).fit()
         # Calculate Cook's distance for each observation
-        influence = OLSInfluence(model_pre)
-        cooks_d = influence.cooks_distance[0]
-        student_resid = influence.resid_studentized_internal
+        #influence = OLSInfluence(model_pre)
+        #cooks_d = influence.cooks_distance[0]
+        #student_resid = influence.resid_studentized_internal
+        if quarterConfig is not None and quarterConfig['DIAGNOSTIC_PLOTS'] is not None:
+            save_diagnostic_plots(model, formula, quarterConfig['DIAGNOSTIC_PLOTS'])
+        print("Model to adjust CBP "+response+" to quarter "+str(generalConfig['QTR']))
+        print(model.summary())
+        data.loc[(~data['wages_cbp'].isna()) & (~data['wages_qcew'].isna()) & (~data['emp3_cbp'].isna()),response+"_cbp"]=model.fittedvalues()
+        return data
 
-
-# get random midpoint between lower bound (lb) and upper bound (up)
-def random_midpoint(datarw):
-    if datarw['lb']==datarw['ub']:
-        return(datarw['lb'])
-    elif datarw['lb']<datarw['ub']:
-        return(round(np.random.uniform(float(datarw['lb']),float(datarw['ub'])),0))
-    else:
-        return datarw['lb']
-
-
-## Functions below are only used if for some reason there are missing imputed employments. They investigate and attempt to fill the situation.
-def cbp_mismatch(data):
-    print(data.columns)
-    if "emp" not in data.columns:
-        changecolname=True
-        data['emp']=data['emp3_cbp']
-        data['qp1']=data['wages_cbp']
-    else:
-        changecolname=False
-    if "estnum" not in data.columns:
-        data['estnum']=data['est']
-    missdf=data[data['emp'].isna()]
-    if len(missdf)>0:
-        #print(missdf.head())
-        missfips=missdf['geography'].unique()
-        missindlvl=sorted(missdf['ind_level'].unique())
-        print("In merged CBP: There are "+str(len(missdf))+" rows without emp. # FIPS codes missing="+str(len(missfips))+". Industry levels with missing values: "+", ".join([str(x) for x in missindlvl]))
-        weirddf=None
-        for ilvl in missindlvl:
-            print("Starting to adjust industry level: "+str(ilvl))
-            if ilvl==6:
-                pass
-            else:
-                missilvl=missdf[missdf['ind_level']==ilvl]
-                for gikey in missilvl['geoindkey']:
-                    missdf,weirddf, data=not_subdivided(gikey,missdf,weirddf,data)
-        print(missdf[missdf['emp_nf']=="Manual Fill"].head())
-        print("weirddf has "+str(len(weirddf))+" rows.")
-        weirddf.drop(columns=['industry','geography','qp1','qp1_nf','_merge','emp'],inplace=True)
-        weirddf.reset_index(inplace=True,drop=True)
-        print(pd.crosstab(weirddf['ind_level'],weirddf['note']))
-        print("ind_level")
-        print(weirddf['ind_level'].value_counts())
-        print("emp_nf")
-        print(weirddf['emp_nf'].value_counts())
-        print("estnum")
-        print(weirddf['estnum'].value_counts())
-        print("state")
-        print(weirddf['state'].value_counts())
-        print("head weirddf")
-        print(weirddf.head())
-        print("99----")
-        print(data[data['geoindkey'].str.endswith('99----')])
-        #weirdidx=data['geoindkey'].isin(weirddf['geoindkey'].unique())
-        print("Manual Fill on Employment")
-        print(pd.crosstab(data['ind_level'],data['emp_nf']))
-        print("Manual Fill on Wages")
-        print(pd.crosstab(data['ind_level'], data['qp1_nf']))
-        #if "ub" in data.columns:
-        #    data[data['geoindkey'].isin(weirdidx),"emp"]=data.loc[data['geoindkey'].isin(weirdidx),:].apply(random_midpoint,axis=1)
-    if changecolname:
-        data['emp3_cbp']=data['emp']
-        data['wages_cbp']=data['qp1']
-        data.drop(columns=["emp",'qp1'],inplace=True)
-    return data
-
-
-def not_subdivided(geoindkey,missdf,investigatedf=None,fulldf=None):
-    missdf.reset_index(drop=True,inplace=True)
-    if geoindkey.endswith("------"):
-        print("geoindkey indicates it is a county total, which is weird")
-        print(missdf[missdf['geoindkey']==geoindkey])
-        return missdf, investigatedf, fulldf
-    else:
-        geoindstem=geoindkey.replace("/","").replace("-","")
-        lowerlvl_bool=missdf['geoindkey'].str.startswith(geoindstem,na=False)
-        lowerindlvls=missdf[lowerlvl_bool]
-        uniqest=lowerindlvls['estnum'].unique()
-        #print(geoindkey + " has stem " + geoindstem+" and unique est is: ",uniqest)
-        keepgeoindkey = missdf['geoindkey'] == geoindkey
-        missdf = missdf[(keepgeoindkey) | (~lowerlvl_bool)].reset_index(drop=True)
-        checkgeoindkeyin = missdf['geoindkey'] == geoindkey
-        if checkgeoindkeyin.sum() == 0:
-            print("something wrong geoindkey was not kept " + geoindkey)
-        checklowernotin = missdf['geoindkey'].str.startswith(geoindstem, na=False)
-        if checklowernotin.sum() > 1:
-            print("something wrong sublevels of geoindkey were kept " + geoindkey)
-        if len(uniqest)==1: #each lower cell is essentially a copy of geoindkey cell
-            if fulldf is not None:
-                skiplist=None
-                abovegeostem=geoindstem[:-1]
-                geoindrw=missdf.loc[keepgeoindkey,:]
-                indlvlkey=geoindrw['ind_level'].reset_index(drop=True).iloc[0]
-                if indlvlkey==2:
-                    fulldf,skiplist=fix_missing_sector_cbp(fulldf,geoindkey,skiplist)
-
-                else:
-                    abovefull=fulldf[fulldf['geoindkey'].str.startswith(abovegeostem,na=False)]
-                    oneabove=abovefull.loc[abovefull['ind_level']==indlvlkey-1,:]
-                    atlvl=abovefull.loc[abovefull['ind_level']==indlvlkey,:]
-                    geoindkey_atlvl=atlvl['geoindkey'].unique()
-                    if len(geoindkey_atlvl)>1:
-                        fulldf, skiplist, investigatedf= fix_missing_naics_cbp(fulldf,geoindkey,skiplist,investigatedf)
-                        #print("More than 1 geoindkey at ind_level: ",geoindkey_atlvl)
-                    else: #if geoindkey is the only child at this level of the parent geoindstem, use one above
-                        if len(oneabove)!=1: #there isn't one above???
-                            temp=geoindrw
-                            temp['note']="no 1-level up geoindkey (not_subdivided)"
-                            if investigatedf is None:
-                                investigatedf=temp
-                            else:
-                                investigatedf=pd.concat([investigatedf,temp],ignore_index=True,axis=0)
-                        else:
-                            fulldf.loc[fulldf['geoindkey'].str.startswith(abovegeostem,na=False),"emp"]=oneabove['emp'].reset_index(drop=True).iloc[0]
-            return missdf, investigatedf,fulldf
-        else:
-            lowerindlvls=lowerindlvls.sort_values(by='ind_level')
-            lowerindlvls.reset_index(inplace=True)
-            changeest=lowerindlvls['est'].diff()
-            change_bool=changeest!=0
-            idx_change=change_bool[change_bool].index.values.tolist()
-            beforelvl=lowerindlvls.iloc[[x-1 for x in idx_change],:]
-            beforelvl=beforelvl['ind_level'].to_numpy()
-            changelvl=np.array([x+1 for x in np.unique(beforelvl)])
-            investigate_lvls=np.unique(np.concat((beforelvl,changelvl)))
-            temp=lowerindlvls[lowerindlvls['ind_level'].isin(investigate_lvls.tolist())].reset_index(drop=True)
-            temp["note"]=["est changes (not subdivided)"]*len(temp)
-            if investigatedf is None:
-                investigatedf=temp
-            else:
-                investigatedf=pd.concat([investigatedf,temp],axis=0,ignore_index=True)
-
-            #print("there are subdivided lower levels of "+geoindkey)
-            return missdf, investigatedf, fulldf
-
-def fix_missing_sector_cbp(data,geoindkey,skiplist=None):
-    if skiplist is not None and geoindkey in skiplist:
-        return data, skiplist
-    geoindrw=data[data['geoindkey']==geoindkey]
-    geo=geoindrw['geography'].reset_index(drop=True).iloc[0]
-    geodf=data[data['geography']==geo]
-    cntytotal_emp=geodf.loc[geodf['ind_level']==0,'emp'].values[0]
-    cntytotal_wage=geodf.loc[geodf['ind_level']==0,'qp1'].values[0]
-    geosectordf=geodf[geodf['ind_level']==2]
-    geosector_emp=geosectordf['emp']
-    geosectsum_emp=geosector_emp.sum(skipna=True)
-    geosector_wage = geosectordf['qp1']
-    geosectsum_wage=geosector_wage.sum(skipna=True)
-    if geosectsum_emp==cntytotal_emp:
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),"emp"]=0
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),"_merge"]="ronly_fill0"
-        if skiplist is None:
-            skiplist=data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),'geoindkey']
-        else:
-            skiplist=pd.concat([skiplist,data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),'geoindkey']],ignore_index=True)
-
-        return data, skiplist
-    if geosectsum_wage==cntytotal_wage:
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2), "qp1"] = 0
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),'qp1_nf']="Manual Fill"
-        return(data)
-    numna_emp=geosector_emp.isna().sum()
-    numna_wage=geosector_wage.isna().sum()
-    if numna_emp==1:
-        data.loc[data["geoindkey"] == geoindkey, "emp"] = cntytotal_emp - geosector_emp.sum(skipna=True)
-    else:
-        empdiff=cntytotal_emp-geosectsum_emp
-        imputeparams_emp=geosectordf.loc[geosectordf['emp'].isna(),'estnum']
-        impute_emp=dirichlet_divider(imputeparams_emp,empdiff,size=1,rseed=int(geo))
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),"emp"]=impute_emp
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),"_merge"]="ronly_impute"
-        data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),"emp_nf"]="Manual Fill"
-
-        if skiplist is None:
-            skiplist=data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),'geoindkey']
-        else:
-            skiplist=pd.concat([skiplist,data.loc[(data['geography']==geo)&(data['emp'].isna())&(data["ind_level"]==2),'geoindkey']],ignore_index=True)
-    if geosector_wage.isna().sum()>1:
-        pass
-        #print("Too many missing sectors ("+str(numna_wage)+") fill in wages for "+str(geo))
-    else:
-        data.loc[data["geoindkey"]==geoindkey,"qp1"]=cntytotal_wage-geosector_wage.sum(skipna=True)
-        data.loc[data["geoindkey"] == geoindkey, "qp1_nf"] = "Manual Fill"
-
-    return data, skiplist
-
-def fix_missing_naics_cbp(data,geoindkey,skiplist=None,investigatedf=None):
-    if skiplist is not None and geoindkey in skiplist:
-        return data, skiplist, investigatedf
-    geoindrw=data[data['geoindkey']==geoindkey]
-    indlvl=geoindrw['ind_level'].values[0]
-    if indlvl==2:
-        data, skiplist=fix_missing_sector_cbp(data,geoindkey,skiplist)
-        return data, skiplist, investigatedf
-    else:
-        geoindstem=geoindkey[:-1]
-        gistemI=(data['geoindkey'].str.startswith(geoindstem))
-        twodf=data.loc[(gistemI)&(data['ind_level'].isin([indlvl,indlvl-1])),:]
-        if len(twodf[twodf['ind_level']==indlvl-1])==0 or twodf.loc[twodf['ind_level']==indlvl-1,'emp'].isna().sum()==0:
-            temp=data[data['geoindkey']==geoindkey].reset_index(drop=True)
-            temp['note'] = ['1 level up missing or NA (fix_missing_naics_cbp)']*len(temp)
-            if investigatedf is None:
-                investigatedf = temp
-            else:
-                investigatedf = pd.concat([investigatedf,temp ], ignore_index=True, axis=0)
-        else: #there are level above values
-            uptotal_emp=twodf.loc[twodf['ind_level']==indlvl-1,'emp'].values[0]
-            uptotal_wage=twodf.loc[twodf['ind_level']==indlvl-1,'qp1'].values[0]
-            lowdf=twodf[twodf['ind_level']==indlvl]
-            low_emp=lowdf['emp']
-            low_wage = lowdf['qp1']
-            lwsum_emp=low_emp.sum(skipna=True)
-            lwsum_wage=low_wage.sum(skipna=True)
-            if lwsum_emp==uptotal_emp:
-                data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),"emp"]=0
-                data.loc[(gistemI) & (data['emp'].isna()) & (
-                            data["ind_level"] == indlvl), "_merge"] = "ronly_fill0"
-                if skiplist is None:
-                    skiplist=data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),'geoindkey']
-                else:
-                    skiplist=pd.concat([skiplist,data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),'geoindkey']],ignore_index=True)
-                return data, skiplist
-            if lwsum_wage==uptotal_wage:
-                data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl), "qp1"] = 0
-                data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),'qp1_nf']="Manual Fill"
-                return(data)
-            numna_emp=low_emp.isna().sum()
-            numna_wage=low_wage.isna().sum()
-            if numna_emp==1:
-                data.loc[data["geoindkey"] == geoindkey, "emp"] = uptotal_emp - lwsum_emp
-            else:
-                empdiff=uptotal_emp-lwsum_emp
-                imputeparams_emp=lowdf.loc[lowdf['emp'].isna(),'est']
-                impute_emp=dirichlet_divider(imputeparams_emp,empdiff,size=1,rseed=int(lowdf[lowdf['emp'].isna()].index.values[0]))
-                data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),"emp"]=impute_emp
-                data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),"emp_nf"]="Manual Fill"
-                data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),"_merge"]="ronly_impute"
-                if skiplist is None:
-                    skiplist=data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),'geoindkey']
-                else:
-                    skiplist=pd.concat([skiplist,data.loc[(gistemI)&(data['emp'].isna())&(data["ind_level"]==indlvl),'geoindkey']],ignore_index=True)
-            if numna_wage>1:
-                pass
-                #print("Too many missing sectors ("+str(numna_wage)+") fill in wages for "+str(geo))
-            else:
-                data.loc[data["geoindkey"]==geoindkey,"qp1"]=uptotal_wage-lwsum_wage
-                data.loc[data["geoindkey"] == geoindkey, "qp1_nf"] = "Manual Fill"
-    return data, skiplist, investigatedf
 
 
 
@@ -904,22 +711,26 @@ def fix_missing_naics_cbp(data,geoindkey,skiplist=None,investigatedf=None):
 
 # # # test code
 # # #
-#with open('config_pre2017.yaml', 'r') as configFile:
-#     config = yaml.safe_load(configFile)
-#preprocessConfig = config['preprocessConfig']
-#generalConfig = config['generalConfig']
-#foldername = preprocessConfig['DATA_IN_FOLDER']
+with open('config_pre2017.yaml', 'r') as configFile:
+     config = yaml.safe_load(configFile)
+preprocessConfig = config['preprocessConfig']
+generalConfig = config['generalConfig']
 
+foldername = preprocessConfig['DATA_IN_FOLDER']
+#
 #generalConfig["QCEWDIR"]=None
-#temp=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
-#                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
-#                   qwifolder=foldername + preprocessConfig['QWIDIR'],
-#                     generalConfig=generalConfig,
-#                          preprocessConfig=preprocessConfig,
-#                   outfilename=generalConfig['COMBINED_DATA'],
-#                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
-#                   outfilepath = preprocessConfig['OUTPATH'],
-#                year=generalConfig['YEAR'])
+temp=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
+                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
+                   qwifolder=foldername + preprocessConfig['QWIDIR'],
+                     generalConfig=generalConfig,
+                          preprocessConfig=preprocessConfig,
+                   outfilename=generalConfig['COMBINED_DATA'],
+                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
+                   outfilepath = preprocessConfig['OUTPATH'],
+                year=generalConfig['YEAR'])
 
-#print(temp.head())
+#print(temp.loc[:,].sort_values(by='geoindkey').head(20))
+#print(temp.loc[:,].sort_values(by='geoindkey').tail(10))
+print(temp.columns)
+print(temp.head())
 # # #

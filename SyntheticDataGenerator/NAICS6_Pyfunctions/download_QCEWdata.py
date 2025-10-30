@@ -122,9 +122,7 @@ def download_QCEW(generalConfig, preprocessConfig,savechunks=2,forcombine=False)
             pattern=str(stabbr[0])
             stselector = fipsdf.area_fips.str.startswith(pattern)
             stateselector=stateselector|stselector
-        print(stateselector)
         fipsdf=fipsdf[stateselector]
-        print(fipsdf.iloc[1:10,1:3])
         areadf = combine_states(fipsdf=fipsdf, year=year, qtr=qtr, stateselector=stateselector)
         if savefile is not None:
             if re.match(".csv",savefile):

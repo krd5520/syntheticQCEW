@@ -43,6 +43,7 @@ def start(config):
             print("Combining CBP and QWI datasets.")
             foldername = preprocessConfig['DATA_IN_FOLDER']
             if generalConfig['API_KEY'] is not None:
+                print("Downloading Datasets")
                 fipscodes_df=pd.read_csv(generalConfig["FIPS_STATE_FILE"])
                 if generalConfig["STATES"] is None or generalConfig["STATES"]==["ALL"]:
                     states=[]
@@ -57,11 +58,20 @@ def start(config):
                 if not os.path.exists(foldername + preprocessConfig['CBPDATA']):
                     download_rawCBP(fipscodes_df=fipscodes_df, preprocessConfig=preprocessConfig,
                                               generalConfig=generalConfig, max_retries=3)
-                if "QCEWDIR" in generalConfig and generalConfig["QCEWDIR"] is not None:
+                if "QCEWDIR" in preprocessConfig and preprocessConfig["QCEWDIR"] is not None:
                     check_dir(foldername + preprocessConfig['QCEWDIR'])
                     if os.listdir(foldername + preprocessConfig['QCEWDIR']) == []:
-                        download_QCEW(generalConfig=generalConfig, preprocessConfig=preprocessConfig, savechunks=1,
+                        qcew=download_QCEW(generalConfig=generalConfig, preprocessConfig=preprocessConfig, savechunks=1,
                                       forcombine=True)
+                        print("download qcew")
+                    if os.listdir(foldername+preprocessConfig['QCEWDIR'])==[]:
+                        print("acew didn't save properly???")
+                        qcew.to_csv(foldername+preprocessConfig['QCEWDIR'])
+                readinData = time.time() - startime
+            else:
+                readinData=""
+
+            createcombinedstart=time.time()
             df=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
                                imputedfile=foldername + preprocessConfig['IMPUTECBP'],
                                qwifolder=foldername + preprocessConfig['QWIDIR'],
@@ -72,7 +82,7 @@ def start(config):
                                outfilepath=preprocessConfig['OUTPATH'],
                                year=generalConfig['YEAR'])
             print("Combined file is saved: "+str(generalConfig['COMBINED_DATA']))
-            createCombined=time.time()-startime
+            createCombined=time.time()-createcombinedstart
         print(df.head())
         print(df.columns)
         startNAICS6=time.time()
@@ -122,4 +132,5 @@ if __name__ == "__main__":
     #main()
     with open("config_pre2017.yaml", 'r') as configFile:
         config = yaml.safe_load(configFile)
+
     start("config_pre2017.yaml")

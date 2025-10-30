@@ -176,7 +176,11 @@ def download_QWI(fipscodes_df,preprocessConfig,generalConfig,savechunks=4,max_re
 
 ########## CBP Download ##########
 def download_rawCBP(fipscodes_df,preprocessConfig,generalConfig,max_retries = 3):
-    year=generalConfig["YEAR"]
+    if generalConfig["QTR"]==4:
+        year=generalConfig["YEAR"]+1
+    else:
+        year=generalConfig["YEAR"]
+
     api_key = generalConfig['API_KEY']
     url = "https://api.census.gov/data/"+str(year)+"/cbp"
     state_abbr = {
