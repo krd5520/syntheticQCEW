@@ -1,0 +1,18 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+SyntheticDataGenerator/NAICS6_Pyfunctions/__pychache__/
+SyntheticDataGenerator/DataDiag/
+Datasets/
+SyntheticDataGenerator/.idea/
+SyntheticDataGenerator/GUIcode/
+
+*.pyc
+*$py.class
+
+venv/
+SyntheticDataGenerator/DataDiag/DataIn/
+SyntheticDataGenerator/DataDiag/DataIn/ImputeCBP/
+SyntheticDataGenerator/DataDiag/PythonMicrodataSubsets/
+Datasets/*.csv
+Datasets/*.txt
