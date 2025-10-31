@@ -27,16 +27,28 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,df=None
     # dfsave = df.copy()
 
     ##check is qcew is being used?
-
-    if "_qcew" in df.columns:
+    qcewcols=[col for col in df.columns if "_qcew" in col]
+    if len(qcewcols)>0:
         print("Using QCEW when available...")
         useqcew=True
-        df['estnum']=df['estnum_qcew']
-        df['emp3']=df['emp3_qcew']
-        df['emp1'] = df['emp1_qcew']
-        df['emp2'] = df['emp2_qcew']
-        df['wages'] = df['wages_qcew']
-        for vname in ["emp1","emp3","wages"]:
+        for vname in ["estnum","emp3","emp2","emp1","wages"]:
+            df[vname]=df[vname+"_qcew"]
+            df[vname+"_source"]=""
+            df.loc[~df[vname].isna(),vname+"_source"]="qcew"
+        print("When QCEW wages are not availiable, use CBP.")
+        df = quarter_source_adjustment(df, generalConfig, "wages", quarterConfig=None,
+                                          formula="wages~wages_cbp",
+                                          adjust_source=True, source="CBP", rseed=1)
+        print("When QCEW emp1 and emp3 are not availiabl, use QWI and then CBP.")
+        df = quarter_source_adjustment(df, generalConfig, "emp3", quarterConfig=None,
+                                           formula="emp3~emp3_qwi",
+                                           adjust_source=True, source="QWI", rseed=1)
+        df = quarter_source_adjustment(df, generalConfig, "emp3", quarterConfig=None,
+                                       formula="emp3~emp3_cbp",
+                                       adjust_source=True, source="cbp", rseed=1)
+        df = quarter_source_adjustment(df, generalConfig, "emp1", quarterConfig=None,
+                                       formula="emp1~emp1_qwi",
+                                       adjust_source=True, source="QWI", rseed=1)
             df.loc[:,vname+'_source']=np.nan
             df.loc[df[vname].notna(),vname+'_source'] ="QCEW"
             if vname=="wages":

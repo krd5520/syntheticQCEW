@@ -1,0 +1,42 @@
+generalConfig:
+  SEED: 1
+  API_KEY: "912ebc938d348a811445ed26ac8f97b22d57e7ff"
+  YEAR: 2017
+  QTR: 1
+  SKIP_TO_MICRODATA: False
+  NAICS6_PATH: "DataDiag/"
+
+
+preprocessConfig:
+  DATA_IN_FOLDER: "DataDiag/DataIn/"
+  CBPDIR: "CBPdataRAW/"
+  CBPDATA: "CBPdataRAW/cbp16co.txt"
+  QWIDATA: "QWIdata/"
+  OUTPATH: "DataDiag/PythonPreprocessOut/"
+
+getNAICS6Config:
+  FUNCTIONSDIR: "./NAICS6_Pyfunctions/"
+  DATASET: "DataDiag/PythonPreprocessOut/combineQWIandCBP.csv"
+
+employmentConfig:
+  OLS_FORMULA: "Emp ~ EmpEnd + estnum + C(sector) + C(state)"
+  M2EMP_NOISECOEF: 1.69
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
+  OUTLIER_THRESH: 4.3 # Threshold for outliers using studentized residuals (4.3 chosen to filter out 0.3% of the dataset.)
+  RSEED: 5 # This RSEED is for employment imputation
+
+microdataConfig:
+  ## Dirichlet Prior parameters:
+  EST_SEED: 1 #This is the seed for the microdata generation
+  GAM_SHAPE: 3 #10
+  GAM_SCALE: 20 #200
+  M2EMP_NOISECOEF: 1.69
+  WAGE_MIN: 3
+  NUMCHUNK: 35 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
+  OUTPATH: "DataDiag/PythonMicrodataSubsets/"
+
+postprocessingConfig:
+  INPATH: "DataDiag/PythonMicrodataSubsets/"
+  CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
+  FIPS_STATE_FILE: "DataDiag/FIPSstatecodename.txt"
+  OUTPATH: "./FinalMicrodata"

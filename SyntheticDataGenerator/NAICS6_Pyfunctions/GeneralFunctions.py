@@ -9,7 +9,95 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 
-def custom_predict(df, ols_model,rseed=None):
+def transform_feature(feature, df):
+    if feature in df.columns:
+        return df[feature]
+    elif '[T.' in feature:
+        base_var = feature.split('(',1)[1].split(')')[0].strip()
+        category = feature.split('[T.')[1].split(']')[0].strip()
+        return (df.loc[:,base_var] == category).astype(float)
+    elif 'np.sqrt' in feature:
+        internalvar = feature.split('(')[1].split(')')[0].strip()
+        return np.sqrt(df.loc[:,internalvar].astype(float))
+    elif 'np.log' in feature:
+        internalvar = feature.split('(')[1].split(')')[0].strip()
+        return np.log(df.loc[:,internalvar].astype(float))
+    else:
+        raise Exception(f'Something wrong with feature. {feature}.\nIt should be: in df columns; a categorical, log, or sqrt transformation; or a polynomial term.')
+
+def feature_to_colname(feature, df):
+    if feature in df.columns:
+        return feature
+    elif feature.replace(" ","") in [cname.replace(" ","") for cname in df.columns.tolist()]:
+        npspacecnames=[cname.replace(" ","") for cname in df.columns.tolist()]
+        colname=[cname for cname,nospacename in zip(df.columns.tolist(),npspacecnames) if nospacename==feature.replace(" ","")]
+        return colname[0]
+    elif 'poly' in feature and "(" in feature:
+        internal_var=feature.split("(",1)[1].split(',')[0]
+        return feature_to_colname(internal_var,df)
+    elif '[T.' in feature:
+        return feature_to_colname(feature.split('(',1)[1].split(')')[0].strip(),df)
+    elif 'np.sqrt' in feature:
+        return feature_to_colname(feature.split('(')[1].split(')')[0].strip(),df)
+    elif 'np.log' in feature:
+        return feature_to_colname(feature.split('(')[1].split(')')[0].strip(),df)
+    else:
+        raise Exception(f'Something wrong with feature. {feature}.\nIt should be: in df columns; a categorical, log, or sqrt transformation; or a polynomial term.')
+
+
+def polynomial_handling(feature,X,df):
+    inside_poly = feature.split('(', 1)[1].split(',')
+    base_var = inside_poly[0].strip()
+    degree_sect=inside_poly[1].split('[')[0]
+    degree_pre = [char for char in degree_sect if char.isdigit()]
+    degree = "".join(degree_pre)
+
+    nospacecolnames = [var.replace(" ", "") for var in X.columns]
+    # Only process if we haven't already created these columns
+    if f'poly({base_var.replace(" ", "")},degree={degree})[1]' not in nospacecolnames:
+        if "np.sqrt(" in base_var:
+            internal_var = base_var.split("(")[1].split(")")[0].strip()
+            transformsqrt=np.sqrt(df.loc[X.index,internal_var].astype(float))
+            #nan_mask = np.isnan(transformsqrt)
+            #index_drop = [idx for idx, nabool in zip(transformsqrt.index.tolist(), transformsqrt) if np.isnan(nabool)]
+            #X.drop(index_drop, inplace=True)
+            #transformsqrt.drop(index_drop, inplace=True)
+            vals = transformsqrt.values.reshape(-1, 1)
+        elif "np.log(" in base_var:
+            internal_var = base_var.split("(")[1].split(")")[0].strip()
+            transformlog = np.log(df.loc[X.index,internal_var].astype(float))
+            #nan_mask = np.isnan(transformlog)
+            #index_drop = [idx for idx, nabool in zip(transformlog.index.tolist(), transformlog) if np.isnan(nabool)]
+            #X.drop(index_drop, inplace=True)
+            #transformlog.drop(index_drop, inplace=True)
+            vals = transformlog.values.reshape(-1, 1)
+        else:
+            vals_prep = df.loc[X.index,base_var].astype(float)
+            #nan_mask=np.isnan(vals_prep)
+            #index_drop=[idx for idx,nabool in zip(vals_prep.index.tolist(),vals_prep) if np.isnan(nabool)]
+            #X.drop(index_drop,inplace=True)
+            #vals_prep.drop(index_drop, inplace=True)
+            vals=vals_prep.values.reshape(-1, 1)
+        # Create polynomial features
+
+        poly = PolynomialFeatures(degree=int(degree), include_bias=False)
+        raw_poly = poly.fit_transform(vals)
+        # Center and orthogonalize using QR decomposition
+        centered = raw_poly - raw_poly.mean(axis=0)
+        Q, R = np.linalg.qr(centered)
+        # Ensure consistent sign
+        signs = np.sign(Q[0, :])
+        Q = Q * signs
+        # Store all polynomial terms
+        for i in range(int(degree)):
+            if "degree=" in feature.replace(" ",""):
+                X[f'poly({base_var.replace(" ", "")},degree={degree})[{i + 1}]'] = Q[:, i]
+            else:
+                X[f'poly({base_var.replace(" ", "")},{degree})[{i + 1}]'] = Q[:, i]
+
+    return X
+
+def custom_predict(data, ols_model,rseed=None):
     '''
     What is the point?
         custom_predict() provides predictions and standard errors from a statsmodels OLS model,
@@ -55,12 +143,27 @@ def custom_predict(df, ols_model,rseed=None):
         np.random.seed(rseed)
     # Get feature names from the fitted model
     model_features = ols_model.model.exog_names
-    X = pd.DataFrame(index=df.index)
+    df=data.copy()
+    pred_idx=df.index.tolist()
+    ## get relevant index
+    for feature in model_features:
+        if feature == 'Intercept':
+            # Add intercept column
+            X['Intercept'] = 1
+        else:
+            featurecolname=feature_to_colname(feature,df)
+            missing_mask=df[featurecolname].isna()
+            pred_idx=list(set(pred_idx)-set(df.loc[missing_mask,:].index.tolist()))
+
+    X = pd.DataFrame(index=pred_idx)
+    df=df.loc[pred_idx,:]
     # Process each feature in the model 
     for feature in model_features:
         # Skip intercept - we'll add it later
         if feature == 'Intercept':
             continue
+        elif "poly(" in feature or "poly (" in feature: #polynomial terms
+            X = polynomial_handling(feature, X, df)
         # Handle interaction terms
         elif ':' in feature or "*" in feature:
             astcount=feature.count("*")
@@ -71,63 +174,31 @@ def custom_predict(df, ols_model,rseed=None):
                 var1, var2 = feature.split("*")
             else:
                 var1, var2 = feature.split(':')
-            if '[T.' in var1:
-                base_var1 = var1.split('C(')[1].split(')')[0]
-                category1 = var1.split('[T.')[1].split(']')[0]
-                if '[T.' in var2:
-                    base_var2 = var2.split('C(')[1].split(')')[0]
-                    category2 = var2.split('[T.')[1].split(']')[0]
-                    X[feature] = (df[base_var1] == category1).astype(float) * (df[base_var2] == category2).astype(float)
-                else:
-                    X[feature] = (df[base_var1] == category1).astype(float) *df[var2].astype(float)
-            elif '[T.' in var2:
-                base_var2 = var2.split('C(')[1].split(')')[0]
-                category2 = var2.split('[T.')[1].split(']')[0]
-                X[feature] = (df[base_var2] == category2).astype(float) * df[var1].astype(float)
-            elif var1 in df.columns and var2 in df.columns:
-                X[feature] = df[var1].astype(float) * df[var2].astype(float)
-            else:
-                raise Exception(f"Cannot find variables {var1} and {var2} in data to use in interation {feature}.")
-        # Handle polynomial terms (e.g., 'poly(var, degree=3)')
-        elif 'poly' in feature and "(" in feature:
-            inside_poly = feature.split('(')[1].split(',')
-            base_var=inside_poly[0].strip()
-            degree_pre=[char for char in inside_poly[1] if char.isdigit()]
-            degree="".join(degree_pre)
-            nospacecolnames=[var.replace(" ","") for var in X.columns]
-            # Only process if we haven't already created these columns
-            if f'poly({base_var.replace(" ","")},degree={degree})[1]' not in nospacecolnames:
-                vals = df[base_var].astype(float).values.reshape(-1, 1)
-                # Create polynomial features
-                poly = PolynomialFeatures(degree=int(degree), include_bias=False)
-                raw_poly = poly.fit_transform(vals)
-                # Center and orthogonalize using QR decomposition
-                centered = raw_poly - raw_poly.mean(axis=0)
-                Q, R = np.linalg.qr(centered)
-                # Ensure consistent sign
-                signs = np.sign(Q[0, :])
-                Q = Q * signs
-                # Store all polynomial terms
-                for i in range(int(degree)):
-                    X[f'poly({base_var.replace(" ","")},degree={degree})[{i+1}]'] = Q[:, i]
-        # Handle categorical variables (e.g., 'C(var)[T.level]')
-        elif '[T.' in feature:
-            base_var = feature.split('C(')[1].split(')')[0]
-            category = feature.split('[T.')[1].split(']')[0]
-            X[feature] = (df[base_var] == category).astype(float)
-        # Handle regular numeric predictors
-        elif feature in df.columns:
-            X[feature] = df[feature].astype(float)
-    # Add intercept column
-    X['Intercept'] = 1
+            var1col=transform_feature(var1,df)
+            var2col=transform_feature(var2,df)
+            X[feature]=var1col.astype(float)*var2col.astype(float)
+            #featurena=np.isnan(X[feature])
+            #index_to_remove=[idx for idx,nabool in zip(X.index.tolist(),featurena) if not nabool]
+            #X.drop(index_to_remove,inplace=True)
+        else:
+            X[feature]=transform_feature(feature,df)
+            featurena = np.isnan(X[feature])
+            #index_to_remove = [idx for idx, nabool in zip(X.index.tolist(), featurena) if not nabool]
+            #X.drop(index_to_remove, inplace=True)
+
+
     # Ensure columns match original model order
-    X = X[model_features]
+    nospace_features=[feat.replace(" ","") for feat in model_features]
+    X.columns=[cname.replace(" ","") for cname in X.columns.tolist()]
+    X = X[nospace_features]
+
     # Generate predictions
     pred = ols_model.predict(X)
+
     # Calculate standard errors of prediction
     cov_matrix = ols_model.cov_params().values
     X_np = X.values
-    chunk_size = 1000 ## Process in chunks to keeep memory from blowing up
+    chunk_size = 1000 ## Process in chunks to keep memory from blowing up
     n = len(X_np)
     se_fit = np.empty(n)
     for i in range(0, n, chunk_size):
@@ -318,3 +389,113 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
         return np.round(rprops.flatten() * total).astype(float)
     else:
         return total
+
+def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None, formula=None, adjust_source=True,source="CBP",rseed=None):
+        '''
+        What is the point?
+            get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
+            predictors. This model is used when direct employment data is missing.
+        Steps:
+            1. Filters input data to include only rows where
+                - 'sEmpEnd' is not suppressed
+                - 'sEmp' is not supressed
+                - 'ind_level' is not "A"
+            2. Initial model fitting
+                - Use formula specified in config.yaml (default: 'Emp ~ EmpEnd + estnum + C(sector) + C(state)')
+                  to construct the design matrix to fit an OLS model. (model_pre).
+            3. Influential point/Outlier detection
+                - Compute Cook's distance for each observation and filter out observations where Cook's
+                  Distance exceeds the threshold set in config.yaml. (default: 1)
+                  Compute Studentized Residuals for each observation and filter out observations where they
+                  exceed the threshold set in config.yaml
+            4. Refit model after removing influential points
+        Configurable Parameters:
+            The regression formula and Cook's disitance thresholds are both configurable via config.yaml
+            under employmentConfig
+        Returns:
+            1. model  -  (statsmodel.OLS)
+                - Used with custom_predict in get_m1emp() to predict month 1 employment counts
+            2. Prints a message if any influential points are removed.
+                - Helpful Diagnostic
+        '''
+        if "year_qtr" not in data.columns:
+            data['year_qtr'] = data['year'] + data['qtr'].astype(float).multiply(0.25)
+        # Step 1
+        # get difference of quarters
+        tempdata = data.copy()
+
+
+        if adjust_source: #adjusting from one data source to another
+            if formula is None:
+                formula = response+"~."
+            subdata=tempdata.loc[~tempdata.loc[:,response].isna(),:].copy()
+        else: #adjusting CBP for quarter
+            tempdata['year_qtr_diff'] = tempdata['year_qtr_cbp'].astype(float) - tempdata['year_qtr'].astype(float)
+
+            if tempdata['year_qtr'].nunique() > 1:
+                formula_stem = response + "~year_qtr_diff+qtr*naics2+"
+            else:
+                formula_stem = response + "~"
+
+            # Retrieve OLS formula from config.yaml if quarterConfig exists
+            if quarterConfig is not None and formula is None:
+                if response == "wages_qcew":
+                    formula = quarterConfig['WAGE_OLS_FORMULA']
+                else:
+                    formula = quarterConfig['EMP_OLS_FORMULA']
+            elif formula is None: #use defaults
+                formula = formula_stem + "wages_cbp*wages_cbp_flag+np.log(estnum_cbp)+np.log(estnum)+emp3_cbp+emp3_cbp_flag+agglvl_code+agglvl_code*naics2"
+
+                #ensure variable type is correct
+                for vname in ["year", "wages_cbp", "estnum_cbp", "estnum", "wages_qcew", "emp1_qcew", "emp2_qcew", "emp3_qcew",
+                          "emp3_cbp"]:
+                    tempdata[vname] = tempdata[vname].astype(float)
+                for vname in ['qtr', 'qtr_cbp', 'wages_cbp_flag', "emp3_cbp_flag", "agglvl_code", "naics2", "naics3", "naics4",
+                              "naics5"]:
+                    tempdata[vname] = tempdata[vname].astype("category")
+            #dataset to fit model on
+            subdata = tempdata[
+                (~tempdata['wages_cbp'].isna()) & (~tempdata['wages_qcew'].isna()) & (~tempdata['emp3_cbp'].isna())].copy()
+
+        # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
+        # and perform initial model fitting
+        y_pre, X_pre = Formula(formula).get_model_matrix(subdata)
+        model = sm.OLS(y_pre, X_pre).fit()
+
+        if adjust_source: #adjusting datasources
+            print("Model to adjust "+source+"  "+ response)
+            print(model.summary())
+
+            #dataset with missing response values
+            no_response=data.loc[data.loc[:,response].isna(),:].copy()
+            pred, se_fit=custom_predict(no_response, model, rseed=rseed)
+            #responsefit = np.random.normal(
+            #    loc=pred,  # Center at predicted values
+            #    scale=se_fit,  # Scale by prediction uncertainty
+            #    size=len(no_response)
+            #)
+
+
+            data.loc[no_response.index.tolist(), response] = np.round(pred,decimals=0)
+            not_na_mask=~np.isnan(pred)
+            new_source_index=[idx for idx,nabool in zip(no_response.index.tolist(),not_na_mask) if not nabool]
+            if response+"_source" not in data.columns:
+                data.loc[:,response+"_source"]=""
+            data.loc[no_response.index.tolist(),response+"_source"]=source.lower()
+            data.loc[data[response].isna(),response+"_source"]=""
+
+
+
+
+        else:
+            if quarterConfig is not None and quarterConfig['DIAGNOSTIC_PLOTS'] is not None:
+                save_diagnostic_plots(model, formula, quarterConfig['DIAGNOSTIC_PLOTS'])
+            print("Model to adjust CBP " + response + " to quarter " + str(generalConfig['QTR']))
+            print(model.summary())
+
+            split_response=response.split("_")
+            split_response.pop()
+            response_stem="_".join(split_response)
+            data.loc[subdata.index.tolist(), response_stem+"_cbp"] = model.fittedvalues()
+
+        return data

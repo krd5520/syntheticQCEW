@@ -379,7 +379,7 @@ def read_qwi_co(folderpath,generalConfig):
 #       qwifolder: str for folder path of folder that includes qwi files with county-level names including "co"
 #       printdiagnostics: logical, if True print shapes of CBP and QWI data and count row in imputed CBP not in QWI
 # OUTPUTS: pd.dataframe of combined CBP and QWI
-def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1):
+def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1):
     state_abbr = {
         "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
         "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
@@ -553,6 +553,24 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
         combinedf=combinedf[combinedf['estnum'].notna()]
         combinedf['cnty'] = combinedf['cnty'].astype("str")
         combinedf['ind_level'] = combinedf['ind_level'].astype("str")
+        if generalConfig['QTR'] != 1:
+            print("Adjusting the values of CBP to match quarter " + str(generalConfig["QTR"]))
+            combinedf = quarter_source_adjustment(combinedf, generalConfig, "wages", quarterConfig=quarterConfig,
+                                               adjust_source=False, rseed=1)
+        ## Adjust values
+        print("Using QCEW when available...")
+        combinedf["wages"]=combinedf['wages_cbp']
+        combinedf["wages_source"]="cbp"
+        combinedf.loc[combinedf["wages"].isna(),"wages_source"]=""
+        for vname in ["emp1", "emp3"]:
+            combinedf[vname] = combinedf[vname + "_qwi"]
+            combinedf[vname + "_source"] = ""
+            combinedf.loc[~combinedf[vname].isna(), vname + "_source"] = "qwi"
+        print("When QWI emp3 is not available, use CBP.")
+        combinedf = quarter_source_adjustment(combinedf, generalConfig, "emp3", quarterConfig=None,
+                                       formula="emp3~emp3_cbp",
+                                       adjust_source=True, source="CBP", rseed=1)
+
         if outfilepath in outfilename:
             combinedf.to_csv(outfilename)
         else:
@@ -564,7 +582,7 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
         combinedf['cnty'] = combinedf['cnty'].astype("str")
         combinedf['ind_level'] = combinedf['ind_level'].astype("str")
         qcew = pd.read_csv(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig["QCEWDIR"] + "qcew_part.csv")
-        fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig)
+        fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig,quarterConfig)
         if outfilepath in outfilename:
             fullcombine.to_csv(outfilename)
         else:
@@ -582,7 +600,7 @@ def qcew_format_geoindkey(data_row): #for QCEW
     data_row['geoindkey']=str(data_row['area_fips'])+"_"+str(naics_code)
     return data_row
 
-def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_agglvl=True):
+def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig,remove_xtra_agglvl=True,suppression_flag="N"):
     if remove_xtra_agglvl:
         keepagglvls=combine['agglvl_code'].unique()
         print("Only keeping QCEW aggregate level codes in CBP/QWI combined data :"+', '.join([str(int(x)) for x in keepagglvls]))
@@ -597,6 +615,9 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_ag
     data.rename(columns={"month1_emplvl": "emp1_qcew","month2_emplvl": "emp2_qcew","month3_emplvl": "emp3_qcew",
                               "total_qtrly_wages": "wages_qcew",
                               "qtrly_estabs": "estnum_qcew"}, inplace=True)
+    suppressed=data['disclosure_code']==suppression_flag
+    for var in ["emp1_qcew","emp2_qcew","emp3_qcew","wages_qcew"]:
+        data.loc[suppressed,var]=np.nan
     data=fill_from_geoindkey(data,numeric_ind_level=True)
     #combine['cnty']=combine['cnty'].astype("str")
     #combine['state'] = combine['state'].astype("str")
@@ -632,102 +653,75 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig,remove_xtra_ag
             print("Note the following NAICS codes are not included in CBP data: "+", ".join(excluded_cbp))
         xtabs.to_csv(preprocessConfig['OUTPATH'] + preprocessConfig["DIAGNOSTIC_FILE"],sep=",",mode="a")
     melddf.drop(columns=["area_fips","industry_code","geo_level","ind_level",'_merge'],inplace=True)
-    return(melddf)
 
-def quarter_adjustment(data,generalConfig,response,quarterConfig=None,formula=None):
-        '''
-        What is the point?
-            get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
-            predictors. This model is used when direct employment data is missing.
-        Steps:
-            1. Filters input data to include only rows where
-                - 'sEmpEnd' is not suppressed
-                - 'sEmp' is not supressed
-                - 'ind_level' is not "A"
-            2. Initial model fitting
-                - Use formula specified in config.yaml (default: 'Emp ~ EmpEnd + estnum + C(sector) + C(state)')
-                  to construct the design matrix to fit an OLS model. (model_pre).
-            3. Influential point/Outlier detection
-                - Compute Cook's distance for each observation and filter out observations where Cook's
-                  Distance exceeds the threshold set in config.yaml. (default: 1)
-                  Compute Studentized Residuals for each observation and filter out observations where they
-                  exceed the threshold set in config.yaml
-            4. Refit model after removing influential points
-        Configurable Parameters:
-            The regression formula and Cook's disitance thresholds are both configurable via config.yaml
-            under employmentConfig
-        Returns:
-            1. model  -  (statsmodel.OLS)
-                - Used with custom_predict in get_m1emp() to predict month 1 employment counts
-            2. Prints a message if any influential points are removed.
-                - Helpful Diagnostic
-        '''
-        # Step 1
-        # get difference of quarters
-        tempdata=data.copy()
-        tempdata['year_qtr']=tempdata['year']+tempdata['qtr'].astype(float).multiply(0.25)
-        tempdata['year_qtr_diff'] = tempdata['year_qtr_cbp'].astype(float) - tempdata['year_qtr'].astype(float)
-
-        if tempdata['year_qtr'].nunique()>1:
-            formula_stem=response+"~year_qtr_diff+qtr*naics2+"
-        else:
-            formula_stem=response+"~"
-
-        # Retrieve OLS formula from config.yaml if quarterConfig exists
-        if quarterConfig is not None and formula is None:
-            if response=="wages_qcew":
-                formula=quarterConfig['WAGE_OLS_FORMULA']
-            else:
-                formula=quarterConfig['EMP_OLS_FORMULA']
-        elif formula is None:
-            formula=formula_stem+"wages_cbp*wages_cbp_flag+np.log(estnum_cbp)+np.log(estnum)+emp3_cbp+emp3_cbp_flag+agglvl_code+agglvl_code*naics2"
-
-        for vname in ["year","wages_cbp","estnum_cbp","estnum","wages_qcew","emp1_qcew","emp2_qcew","emp3_qcew","emp3_cbp"]:
-            tempdata[vname]=tempdata[vname].astype(float)
-        for vname in ['qtr','qtr_cbp','wages_cbp_flag',"emp3_cbp_flag","agglvl_code","naics2","naics3","naics4","naics5"]:
-            tempdata[vname]=tempdata[vname].astype("category")
-        subdata = tempdata[
-            (~tempdata['wages_cbp'].isna()) & (~tempdata['wages_qcew'].isna()) & (~tempdata['emp3_cbp'].isna())].copy()
-
-# Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
-        # and perform initial model fitting
-        y_pre, X_pre = Formula(formula).get_model_matrix(subdata)
-        model = sm.OLS(y_pre, X_pre).fit()
-        # Calculate Cook's distance for each observation
-        #influence = OLSInfluence(model_pre)
-        #cooks_d = influence.cooks_distance[0]
-        #student_resid = influence.resid_studentized_internal
-        if quarterConfig is not None and quarterConfig['DIAGNOSTIC_PLOTS'] is not None:
-            save_diagnostic_plots(model, formula, quarterConfig['DIAGNOSTIC_PLOTS'])
-        print("Model to adjust CBP "+response+" to quarter "+str(generalConfig['QTR']))
-        print(model.summary())
-        data.loc[(~data['wages_cbp'].isna()) & (~data['wages_qcew'].isna()) & (~data['emp3_cbp'].isna()),response+"_cbp"]=model.fittedvalues()
-        return data
-
-
+    if generalConfig['QTR']!=1:
+        print("Adjusting the values of CBP to match quarter "+str(generalConfig["QTR"]))
+        melddf = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=quarterConfig,
+                                       adjust_source=False, rseed=1)
+    ## Adjust values
+    print("Using QCEW when available...")
+    for vname in ["estnum", "emp3", "emp2", "emp1", "wages"]:
+        melddf[vname] = melddf[vname + "_qcew"]
+        melddf[vname + "_source"] = ""
+        melddf.loc[~melddf[vname].isna(), vname + "_source"] = "qcew"
+    print("When QCEW wages are not available, use CBP.")
+    df = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=None,
+                                   formula="wages~wages_cbp-1",
+                                   adjust_source=True, source="CBP", rseed=1)
+    print("When QCEW emp1 and emp3 are not available, use QWI and then CBP.")
+    for source in ["QWI","CBP"]:
+        #havepredictor_noresponse=df[(~df.loc[:,"emp3_"+source.lower()].isna())&(df['emp3'].isna()),:]
+        if sum((~df.loc[:,"emp3_"+source.lower()].isna())&(df['emp3'].isna()))>0:
+            df = quarter_source_adjustment(df, generalConfig, "emp3", quarterConfig=None,
+                                       formula="emp3~emp3_"+source.lower()+"-1",
+                                       adjust_source=True, source=source, rseed=1)
+    if sum((df["emp1"].isna())&(~df["emp1_qwi"].isna()))>0:
+        df = quarter_source_adjustment(df, generalConfig, "emp1", quarterConfig=None,
+                                       formula="emp1~emp1_qwi",
+                                       adjust_source=True, source="QWI", rseed=1)
+    return(df)
 
 
 
 
 # # # test code
 # # #
-#with open('config_pre2017.yaml', 'r') as configFile:
-#     config = yaml.safe_load(configFile)
-#preprocessConfig = config['preprocessConfig']
-#generalConfig = config['generalConfig']
-#
-#foldername = preprocessConfig['DATA_IN_FOLDER']
-#
-#generalConfig["QCEWDIR"]=None
-#temp=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
-#                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
-#                   qwifolder=foldername + preprocessConfig['QWIDIR'],
-#                     generalConfig=generalConfig,
-#                          preprocessConfig=preprocessConfig,
-#                   outfilename=generalConfig['COMBINED_DATA'],
-#                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
-#                   outfilepath = preprocessConfig['OUTPATH'],
-#                year=generalConfig['YEAR'])
+with open('config_pre2017.yaml', 'r') as configFile:
+     config = yaml.safe_load(configFile)
+preprocessConfig = config['preprocessConfig']
+generalConfig = config['generalConfig']
+
+foldername = preprocessConfig['DATA_IN_FOLDER']
+
+##generalConfig["QCEWDIR"]=None
+df=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
+                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
+                   qwifolder=foldername + preprocessConfig['QWIDIR'],
+                     generalConfig=generalConfig,
+                          preprocessConfig=preprocessConfig,
+                   outfilename=generalConfig['COMBINED_DATA'],
+                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
+                   outfilepath = preprocessConfig['OUTPATH'],
+                year=generalConfig['YEAR'])
+
+#df=pd.read_csv(generalConfig['COMBINED_DATA'])
+
+#print(adjdf.loc[dont_impute.index.tolist(),["emp3_qcew","emp3_cbp","estnum_cbp","emp3_qcew_source"]].head(12))
+
+#count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="wages_cbp",newcolname="wageCBP")
+
+#print(count6dig.head())
+# Filter and prepare 4-digit NAICS data
+#df4 = df[df['industry'].str.match(r"^[0-9]{4}[^0-9]{2}", na=False)]
+#df4['geo4naics']=df4['geoindkey'].str.slice(stop=-2)
+#print(df4.head())
+#df4 = df4.merge(count6dig, on='geo4naics', how='left')
+#df4['wagediff_cbp'] = df4['wages_cbp'].astype(float) - df4['wageCBP_sum6by4'].astype(float)
+#count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="wages_cbp",newcolname="wageCBP")
+
+
+#columns_to_convert = ['emp', 'qp1', 'estnum', 'year', 'quarter', "sEmp"]
+#df4[columns_to_convert] = df4[columns_to_convert].astype(float)
 
 #print(temp.loc[:,].sort_values(by='geoindkey').head(20))
 #print(temp.loc[:,].sort_values(by='geoindkey').tail(10))
