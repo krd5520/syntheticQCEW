@@ -22,28 +22,25 @@ preprocessConfig:
   OUTPATH: "DataDiag/PythonPreprocessOut/"
   DIAGNOSTIC_FILE: "diagnosticsCombined.txt" # optional
 
-## For imputation of QCEW missing tabulations for quarters 2,3,or 4 using quarter 1 CBP
-quarterConfig:
-  WAGE_OLS_FORMULA: "wages ~ wages +C(wages_cbp_flag)+C(wages_source)+emp3+ estnum + C(sector) + C(state)"
-  EMP_OLS_FORMULA: "month3_emplvl ~ emp +qp1+qtrly_estabs+C(qp1_nf)+ C(sector) + C(state)"
-  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
-  OUTLIER_THRESH: 4.3 # Threshold for outliers using studentized residuals (4.3 chosen to filter out 0.3% of the dataset.)
-  RSEED: 5 
 
+
+ 
 ## For imputation of County by NAICS-4 monthly employment
 employmentConfig:
-  OLS_FORMULA: "emp1 ~ emp3 + estnum + C(sector) + C(state)+C(emp3_source)"
+  OLS_FORMULA: "np.sqrt(emp1) ~ C(state) + C(naics2) + estnum + poly(np.sqrt(emp3),3) + C(emp3_source) + emp1_sum6by4 + emp1_missing6by4"
   M2EMP_NOISECOEF: 1.69
   COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
-  OUTLIER_THRESH: 4.3 # Threshold for outliers using studentized residuals (4.3 chosen to filter out 0.3% of the dataset.)
+  OUTLIER_THRESH: 4.0 # Threshold for outliers using studentized residuals 
   RSEED: 5 # This RSEED is for employment imputation
+  DIAGNOSTIC_PLOTS: "DataDiag/DiagnosticPlots/month1employment_diagnostics.png"
 
 ## For imputation of County by NAICS-4 monthly quarterly wages
 wageConfig:
-  OLS_FORMULA: "sqrt_wagediff ~ wageCBP_missing6by4*emp3+poly(emp3, degree=3)+C(sector)+C(state)+C(wage_source)"
-  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
-  OUTLIER_THRESH: 6.7 # Threshold for outliers using studentized residuals (6.7 chosen to filter out 0.3% of the dataset.)
+  OLS_FORMULA: "np.sqrt(wages) ~ C(state) + C(naics2) + estnum + count6by4codes + poly(np.sqrt(wages_sum6by4),3) + wages_missing6by4 + poly(np.sqrt(emp1_sum6by4),3) + poly(np.sqrt(emp3),3)"
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance (filters out 1 observation)
+  OUTLIER_THRESH: 3.0 # Threshold for outliers using studentized residuals (
   RSEED: 5 # This RSEED is for employment imputation
+  DIAGNOSTIC_PLOTS: "DataDiag/DiagnosticPlots/wages_diagnostics.png"
 
 ## For disaggregation of County by NAICS-6 data to establishment-level data
 microdataConfig:

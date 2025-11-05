@@ -6,6 +6,7 @@ import sys
 import os
 sys.path.append(os.path.abspath('./'))
 from GeneralFunctions import *
+
 # with open('./config.yaml','r') as configFile:
 #     config = yaml.safe_load(configFile)
 #     employmentConfig = config['employmentConfig']
@@ -40,40 +41,45 @@ def get_m1emp_model(df,employmentConfig):
             - Helpful Diagnostic
     '''
     # Step 1
-    # Retrieve OLS formula from config.yaml
-    formula=employmentConfig['OLS_FORMULA']
-    subqwifull = df[
-        (~df["emp3_qwi_flag"].isna()) & 
-        (df["emp3_qwi_flag"].astype(float) != 5) &
-        (df["emp1_qwi_flag"].astype(float) != 5) &
-        ((df["agglvl_code"] != 71)|(df['agglvl_code']!=51))
-    ].copy()
-    subqwifull["emp1_qwi"] = subqwifull["emp1_qwi"].astype(float)
-    subqwifull["emp3_qwi"] = subqwifull["emp3_qwi"].astype(float)
-    subqwifull["estnum"] = subqwifull["estnum"].astype(float)
+    ## Retrieve OLS formula from config.yaml
+    #formula=employmentConfig['OLS_FORMULA']
+    #subqwifull = df[
+    #    (~df["emp3_qwi_flag"].isna()) &
+    #    (df["emp3_qwi_flag"].astype(float) != 5) &
+    #    (df["emp1_qwi_flag"].astype(float) != 5) &
+    #    ((df["agglvl_code"] != 71)|(df['agglvl_code']!=51))
+    #].copy()
+    #subqwifull["emp1_qwi"] = subqwifull["emp1_qwi"].astype(float)
+    #subqwifull["emp3_qwi"] = subqwifull["emp3_qwi"].astype(float)
+    #subqwifull["estnum"] = subqwifull["estnum"].astype(float)
 
 
-    # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
-    # and perform initial model fitting
-    y_pre, X_pre = Formula(formula).get_model_matrix(subqwifull)
-    model_pre = sm.OLS(y_pre, X_pre).fit()
-    # Calculate Cook's distance for each observation
-    influence = OLSInfluence(model_pre)
-    cooks_d=influence.cooks_distance[0]
-    student_resid = influence.resid_studentized_internal
-    # Identify and remove indices of influential points. (Cook's Distance > threshold)
-    # Threshold is configurable in config.yaml -> employmentConfig -> 'COOKS_THRESH'
-    influential_indices = [i for i, d in enumerate(cooks_d) if d > employmentConfig['COOKS_THRESH']]
-    outliers = [i for i, r in enumerate(student_resid) if np.abs(r) > employmentConfig['OUTLIER_THRESH']]
-    if influential_indices:
-        print("Filtered out the following indices due to influence (Cook's Distance):", influential_indices)
-    if outliers:
-        print("# of outliers filtered (Studentized Residuals):", len(outliers), '|', np.round((len(outliers)/len(subqwifull)),3) * 100, '%')
-    rows_to_drop = influential_indices + outliers
-    subqwifull = subqwifull.drop(subqwifull.index[rows_to_drop])
-    # Rebuild design matrices without influential points and perform final model fitting.
-    y, X = Formula(formula).get_model_matrix(subqwifull)
-    model = sm.OLS(y, X).fit()
+    ## Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
+    ## and perform initial model fitting
+    #y_pre, X_pre = Formula(formula).get_model_matrix(subqwifull)
+    #model_pre = sm.OLS(y_pre, X_pre).fit()
+    ## Calculate Cook's distance for each observation
+    #influence = OLSInfluence(model_pre)
+    #cooks_d=influence.cooks_distance[0]
+    #student_resid = influence.resid_studentized_internal
+    ## Identify and remove indices of influential points. (Cook's Distance > threshold)
+    ## Threshold is configurable in config.yaml -> employmentConfig -> 'COOKS_THRESH'
+    #influential_indices = [i for i, d in enumerate(cooks_d) if d > employmentConfig['COOKS_THRESH']]
+    #outliers = [i for i, r in enumerate(student_resid) if np.abs(r) > employmentConfig['OUTLIER_THRESH']]
+    #if influential_indices:
+    #    print("Filtered out the following indices due to influence (Cook's Distance):", influential_indices)
+    #if outliers:
+    #    print("# of outliers filtered (Studentized Residuals):", len(outliers), '|', np.round((len(outliers)/len(subqwifull)),3) * 100, '%')
+    #rows_to_drop = influential_indices + outliers
+    #subqwifull = subqwifull.drop(subqwifull.index[rows_to_drop])
+    ## Rebuild design matrices without influential points and perform final model fitting.
+    #y, X = Formula(formula).get_model_matrix(subqwifull)
+    if "DIAGNOSTIC_PLOTS" in employmentConfig:
+        diagplots=employmentConfig['DIAGNOSTIC_PLOTS']
+    else:
+        diagplots=None
+    model = get_model(df,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
+    print(model.summary())
     # end. return fitted model.
     return model
 
@@ -143,12 +149,27 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     '''
     if rseed is not None:
         np.random.seed(rseed)
-    m1emp = df["emp1_qwi"]
+    m1emp = df["emp1"]
     # Identify rows to be imputed
-    missm1indicator = df["emp1_qwi_flag"] != 1.0
+    missm1indicator = df["emp1_source"].isna()
+
     missingsub = df[missm1indicator]
     # Get model predictions and standard errors for missing values
     predm1emp, sem1emp= custom_predict(missingsub, m1empmodel)
+
+    ##check index is now filled
+    predidx=predm1emp[predm1emp.notna()].index.values
+    missingidx=missingsub.index.values
+    #print(predidx)
+    #print(missingidx)
+    #print(sum(predidx-missingidx))
+
+    if set(predidx)!=set(missingidx):
+        print(f'lenpredix {len(predidx)}, lenmissingidx {len(missingidx)}')
+        print("predidx!=missingidx")
+        #print(list(set(missingidx)-set(predidx)))
+        print(df.loc[list(set(missingidx)-set(predidx)),["state","naics2","estnum","emp3","emp3_source","emp1_sum6by4","emp1_missing6by4","emp1","emp1_qcew","emp1_qwi"]].head())
+
     # Generate predicted values with random noise based on standard errors
     m1empfit = np.random.normal(
         loc=predm1emp, # Center at predicted values
@@ -157,12 +178,14 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     )
     # Ensure no negative employment and validate against stable values
     m1empfit[m1empfit < 0] = 0
+    m1emp[missm1indicator]=m1empfit
     m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"], missingsub["lwbd_emp_qwi_flag"])
     # Round to whole numbers
+
     output = np.round(m1emp.astype(float), 0)
     # Optionally include imputation indicatior 
     if include_indicator:
-        output = np.column_stack((output, missm1indicator))
+        return output, missm1indicator
     return output
 
 def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=None):
@@ -222,7 +245,7 @@ def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=None):
     #return
     return np.round(m2emp, 0)
 
-def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_m1emp_indicator=False):
+def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_m1emp_indicator=True):
     '''
     What is the point?
         Putting everything together adjust_countytotal_qwi() generates the complete 
@@ -247,13 +270,16 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_
     '''
     if rseed is not None:
         np.random.seed(rseed)
-    qwiemp3_qwiAvailable = ~df4["emp3_qwi"].isna()
-    df4.loc[~qwiemp3_qwiAvailable, "emp3_qwi"] = df4.loc[~qwiemp3_qwiAvailable, "emp"]
+
+    #qwiemp3_qwiAvailable = ~df4["emp3_qwi"].isna()
+    #df4.loc[~qwiemp3_qwiAvailable, "emp3_qwi"] = df4.loc[~qwiemp3_qwiAvailable, "emp"]
     if include_m1emp_indicator:
-        m1empAndFlag = get_m1emp(df=df4, m1empmodel=m1emp_model, include_indicator=True)
-        m1emp = m1empAndFlag[:, 0]  # First column (m1emp values)
-        m1empFlag = m1empAndFlag[:, 1]  # Second column (m1empFlag)
-    m3emp=df4['emp3_qwi']
+        m1emp, m1empFlag = get_m1emp(df=df4, m1empmodel=m1emp_model, include_indicator=True)
+
+        df4.loc[m1empFlag,"emp1_source"]="model"
+    else:
+        m1emp = get_m1emp(df=df4, m1empmodel=m1emp_model, include_indicator=False)
+    m3emp=df4['emp3']
     m2emp = get_m2emp(m1emp, m3emp, df4['lwbd_emp_qwi'].values, df4['lwbd_emp_qwi_flag'].values, noisecoef=m2emp_noisecoef)
     empMat = pd.DataFrame({
     'geoindkey': df4['geoindkey'],
@@ -280,15 +306,15 @@ def adjust_countytotal_qwi(valdf, sumdf):
     sumdf = sumdf.copy()
     # Extract county codes from sumdf(eg. '11111' from '11111_XXXXXX')
     sumdf["stcnty"] = sumdf["geoindkey"].apply(lambda x: re.sub(r"_.*", "", x))
-    sumdf = sumdf[["stcnty", "emp1_qwi", "emp1_qwi_flag"]]
+    sumdf = sumdf[["stcnty", "emp1", "emp1_source"]]
     # Filter to counties with non-suppressed totals
-    HasSumIndic = sumdf["emp1_qwi_flag"].astype(float) == 1.0
+    HasSumIndic = sumdf["emp1_source"].notna()#.astype(float) == 1.0
     groupdf = valdf.copy()
     # Extract county codes from valdf
     groupdf["stcnty"] = groupdf["geoindkey"].apply(lambda x: re.sub(r"_.*", "", x))
     # Covert imputation flag from 0,1 to 'QWI','Model'
     groupdf["m1empFromModel"] = groupdf["m1empFromModel"].apply(
-        lambda x: "Model" if x >= 1 else "QWI"
+        lambda x: "Model" if x >= 1 else "Data"
     )
     # Keep only counties with known totals
     filtered_df = groupdf[groupdf['stcnty'].isin(sumdf.loc[HasSumIndic, 'stcnty'])]
@@ -310,22 +336,22 @@ def adjust_countytotal_qwi(valdf, sumdf):
         f"{col[0]}_{col[1]}" if col[0]!='stcnty' else col[0] 
         for col in groupeddf.columns
     ] 
-    groupeddf = groupeddf[['stcnty', 'summ1emp_Model', 'summ1emp_QWI', 'CellCount_Model', 'CellCount_QWI']]
+    groupeddf = groupeddf[['stcnty', 'summ1emp_Model', 'summ1emp_Data', 'CellCount_Model', 'CellCount_Data']]
     groupdf = groupeddf.copy()
     # QWI_Emp: Total employment from non-imputed rows
-    groupdf['QWI_Emp'] = groupdf['summ1emp_QWI']
+    groupdf['Data_Emp'] = groupdf['summ1emp_Data']
     # Model: Total employment from imputed records
     groupdf['Model'] = groupdf['summ1emp_Model']
-    groupdf = groupdf.drop(columns=['summ1emp_QWI', 'summ1emp_Model', 'CellCount_QWI'])
+    groupdf = groupdf.drop(columns=['summ1emp_Data', 'summ1emp_Model', 'CellCount_Data'])
     # Merge with official county totals
     mergedf = pd.merge(
         groupdf, 
-        sumdf.loc[HasSumIndic].drop(columns=['emp1_qwi_flag']),
+        sumdf.loc[HasSumIndic],#.drop(columns=['emp1_qwi_flag']),
         on='stcnty', 
         how='outer'
     )
     # ModelTotal: Target total for imputed records (official total - QWI_Emp)
-    mergedf['ModelTotal'] = mergedf['emp1_qwi'].astype(float) - mergedf['QWI_Emp']
+    mergedf['ModelTotal'] = mergedf['emp1'].astype(float) - mergedf['Data_Emp']
     # MissingModel: Residual to distribute among imputed records
     mergedf['MissingModel'] = mergedf['ModelTotal'] - mergedf['Model']
         # Merge discrepancies back into original industry-level data
@@ -349,7 +375,7 @@ def adjust_countytotal_qwi(valdf, sumdf):
         valdf['m1emp'] + (valdf['MissingModel'] * valdf['m1emp'] / valdf['Model'])
     )
     # Apply adjustments only to imputed records
-    valdf.loc[(valdf['m1empFromModel'] == 1) & valdf['QWI_Emp'].notna(), 'm1emp'] = valdf['ProposedM1emp']
+    valdf.loc[(valdf['m1empFromModel'] == 1) & valdf['Data_Emp'].notna(), 'm1emp'] = valdf['ProposedM1emp']
     # Ensure non-negative, round and return
     valdf['m1emp'] = valdf['m1emp'].clip(lower=0)
     return valdf['m1emp'].round(0)

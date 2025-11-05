@@ -59,6 +59,12 @@ def preprocess_imputedCBP(imputeCBP):
    imputeCBP["cnty"]=imputeCBP["cnty"].astype(int).astype(str).str.zfill(3)
    return(imputeCBP)
 
+def check_industry(df,colname):
+    pattern_grep = rf"[0-9]{{2}}[^0-9]{{1}}[0-9]{{2}}"
+    if sum(df[colname].str.contains(pattern_grep, regex=True))>0:
+        df.loc[df[colname].str.contains(pattern_grep, regex=True),colname] = df.loc[df[colname].str.contains(pattern_grep, regex=True),colname].str.slice(start=0,stop=2)
+    return df
+
 
 ####
 ####
@@ -82,6 +88,7 @@ def preprocess_imputedCBP_file(imputefile,prefer_lw_up=True):
         lwupdf['geography'] = fips_to_geography(lwupdf)
         # unique identifier
         lwupdf['geoindkey'] = lwupdf['geography'].astype(str) + "_" + lwupdf['naics']
+
 
         #merge with other imputeCBP data
         imputeCBP=imputeCBP.merge(lwupdf,on=['geoindkey','geoindkey'],how="outer",suffixes=['_raw',""],indicator=True,validate="one_to_one")
@@ -147,12 +154,13 @@ def preprocess_imputedCBP_file(imputefile,prefer_lw_up=True):
 #       if supptab==True, then a dataframe for the suppression counts with columns:
 #               aggregate level code (agglvl_code),
 #               number of cells in aggregate level (n)
-#               count of cells where wage is suppressed (wage_suppressed)
-#               percent of cells where wage is suppressed (wage_prop)"
+#               count of cells where wage is suppressed (wages_suppressed)
+#               percent of cells where wage is suppressed (wages_prop)"
 ##               count of cells where employment is suppressed (emp_suppressed)
 #               percent of cells where employment is suppressed (emp_prop)"
 def preprocess_rawCBPcnty(raw,supptab=False,suppressionflags=["S", "D"]):
     raw['geography'] = fips_to_geography(raw)
+    raw=check_industry(raw,"naics")
     raw['geoindkey'] = raw['geography']+"_"+raw['naics']
     #raw.drop(columns=["geography"],inplace=True)
     suppressemp= raw['emp_nf'].isin(suppressionflags)  # |tempraw['emp_nf']=="D"
@@ -182,9 +190,9 @@ def preprocess_rawCBPcnty(raw,supptab=False,suppressionflags=["S", "D"]):
 
         #get indicator of emp or wage being suppressed
         tempraw['suppressemp']=tempraw['emp_nf'].isin(suppressionflags)
-        tempraw["suppresswage"]= tempraw['qp1_nf'].isin(suppressionflags)
+        tempraw["suppresswages"]= tempraw['qp1_nf'].isin(suppressionflags)
 
-        supptabwage=pd.crosstab(tempraw['agglvl_code'], tempraw['suppresswage']).join(pd.crosstab(tempraw['agglvl_code'], tempraw['suppresswage'],normalize="index"),
+        supptabwage=pd.crosstab(tempraw['agglvl_code'], tempraw['suppresswages']).join(pd.crosstab(tempraw['agglvl_code'], tempraw['suppresswages'],normalize="index"),
                                                                                 on="agglvl_code",how='outer',lsuffix='_count',rsuffix='_prop',sort=True)
 
         supptabemp = pd.crosstab(tempraw['agglvl_code'], tempraw['suppressemp'])\
@@ -192,8 +200,8 @@ def preprocess_rawCBPcnty(raw,supptab=False,suppressionflags=["S", "D"]):
             pd.crosstab(tempraw['agglvl_code'], tempraw['suppressemp'], normalize="index"),
             on="agglvl_code", how='outer', lsuffix='_count', rsuffix='_prop', sort=True)
         supptabfull=pd.DataFrame({'agglvl_code':supptabwage.index.values,'n':supptabwage['True_count'].add(supptabwage['False_count']).values,
-                                  'wage_suppressed':supptabwage['True_count'].values,"wage_prop":supptabwage["True_prop"].multiply(100).round(0).values,
-                                 'emp_suppressed':supptabemp['True_count'].values,"emp_prop":supptabemp["True_prop"].multiply(100).round(0).values})#.join(supptabemp,on='agglvl_code',how='outer',lsuffix='_wage',rsuffix='_emp')
+                                  'wages_suppressed':supptabwage['True_count'].values,"wages_prop":supptabwage["True_prop"].multiply(100).round(0).values,
+                                 'emp_suppressed':supptabemp['True_count'].values,"emp_prop":supptabemp["True_prop"].multiply(100).round(0).values})#.join(supptabemp,on='agglvl_code',how='outer',lsuffix='_wages',rsuffix='_emp')
 
     raw=raw[['geoindkey', 'qp1_nf', 'qp1', 'est','emp','geography',"industry","state","cnty",'emp_nf','agglvl_code']]
     if supptab: #if returning suppression table
@@ -317,6 +325,8 @@ def preprocess_qwi(qwi,generalConfig):
     #change industry format to match CBP
     # If sum over all "------", otherwise naisc with trailing '/' to be 6 characters
     qwi[['geography','industry']] = qwi[['geography','industry']].astype(str)
+    qwi=check_industry(qwi,"industry")
+
     qwi.loc[qwi.ind_level=="A",'industry'] = "------"
     qwi.loc[qwi.ind_level=="S",'industry'] = qwi.loc[qwi.ind_level=="S",'industry'].str.ljust(6,'-')
     qwi['industry'] = qwi['industry'].str.ljust(6,"/")
@@ -379,7 +389,7 @@ def read_qwi_co(folderpath,generalConfig):
 #       qwifolder: str for folder path of folder that includes qwi files with county-level names including "co"
 #       printdiagnostics: logical, if True print shapes of CBP and QWI data and count row in imputed CBP not in QWI
 # OUTPUTS: pd.dataframe of combined CBP and QWI
-def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1):
+def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1,only_cbp_codes=True):
     state_abbr = {
         "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
         "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
@@ -546,8 +556,8 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
                               "sEmpS": "lwbd_emp_qwi_flag",
                               "semp1_qwi": "emp1_qwi_flag",
                               "semp3_qwi":"emp3_qwi_flag",
-                              "EarnBeg":"avg_month_emp_wage",
-                              "sEarnBeg":"avg_month_emp_wage_flag"}, inplace=True)
+                              "EarnBeg":"avg_month_emp_wages",
+                              "sEarnBeg":"avg_month_emp_wages_flag"}, inplace=True)
     if "QCEWDIR" not in preprocessConfig or preprocessConfig["QCEWDIR"] is None:
         combinedf = fill_from_geoindkey(combinedf)
         combinedf=combinedf[combinedf['estnum'].notna()]
@@ -583,6 +593,15 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
         combinedf['ind_level'] = combinedf['ind_level'].astype("str")
         qcew = pd.read_csv(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig["QCEWDIR"] + "qcew_part.csv")
         fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig,quarterConfig)
+        fullcombine=fullcombine[fullcombine['estnum'].notna()].copy()
+        if only_cbp_codes:
+            for exclude_code in excluded_cbp:
+                exclude_code=exclude_code.replace("-","").replace("/","")
+                ndig=len(str(exclude_code))
+                if ndig==6:
+                    fullcombine=fullcombine.loc[fullcombine.loc[:,"industry"]!=exclude_code,:]
+                else:
+                    fullcombine = fullcombine.loc[fullcombine.loc[:, "naics" + str(ndig)]!= exclude_code,:]
         if outfilepath in outfilename:
             fullcombine.to_csv(outfilename)
         else:
@@ -591,13 +610,19 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
 
 def qcew_format_geoindkey(data_row): #for QCEW
     naics_code=str(data_row['industry_code'])
+    if "-3" in naics_code:
+        naics_code="31----"
+    elif "-45" in naics_code:
+        naics_code="44----"
+    elif "-49" in naics_code:
+        naics_code="48----"
     if data_row['agglvl_code']==71 or data_row['agglvl_code']==51:
         naics_code="------"
     elif data_row['agglvl_code']==54 or data_row['agglvl_code']==74:
         naics_code=str(naics_code).ljust(6,"-")
     else:
         naics_code=str(naics_code).ljust(6,'/')
-    data_row['geoindkey']=str(data_row['area_fips'])+"_"+str(naics_code)
+    data_row["industry_code"]=naics_code
     return data_row
 
 def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig,remove_xtra_agglvl=True,suppression_flag="N"):
@@ -605,10 +630,16 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
         keepagglvls=combine['agglvl_code'].unique()
         print("Only keeping QCEW aggregate level codes in CBP/QWI combined data :"+', '.join([str(int(x)) for x in keepagglvls]))
         data=data[data['agglvl_code'].astype(float).isin(keepagglvls)]
+
+    data.loc[data["industry_code"]=="31-33","industry_code"]="31"
+
+    data.loc[data["industry_code"]=="44-45","industry_code"]="44"
+    data.loc[data["industry_code"] == "48-49", "industry_code"] = "48"
+
     data=data.apply(qcew_format_geoindkey,axis=1)
+    data['geoindkey']=data["area_fips"].astype(str)+"_"+data['industry_code']
+
     #prepare combine data for merging
-    #combine.drop(columns=['year','qtr'],inplace=True)
-    #prepare qcew for merging
     print("Combining QCEW Data with Other Sources...")
     data.drop(columns=['own_code'],inplace=True)
     data=data.loc[data['qtrly_estabs']>0,:]
@@ -624,6 +655,12 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
     #combine['geography'] = combine['geography'].astype("str")
     geoindkey_inter=set(np.intersect1d(np.array(data['geoindkey'].str.slice(start=0,stop=5)), np.array(combine['geoindkey'].str.slice(start=0,stop=5))).tolist())
     combine.drop(columns={'ind_level','industry','state','cnty','geography','agglvl_code'},inplace=True)
+    #temp=combine['geoindkey'].value_counts()
+    #print(type(temp))
+    #print(temp[temp>1])
+    temp2 = data['geoindkey'].value_counts()
+    #print(type(temp2))
+    #print(temp2[temp2 > 1])
 
     colscomb = np.intersect1d(np.array(data.columns.values), np.array(combine.columns.values)).tolist()
     colscomb=[x for x in colscomb if x in ["year","qtr","geoindkey"]]
@@ -679,6 +716,7 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
         df = quarter_source_adjustment(df, generalConfig, "emp1", quarterConfig=None,
                                        formula="emp1~emp1_qwi",
                                        adjust_source=True, source="QWI", rseed=1)
+
     return(df)
 
 
@@ -686,37 +724,54 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
 
 # # # test code
 # # #
-with open('config_pre2017.yaml', 'r') as configFile:
-     config = yaml.safe_load(configFile)
-preprocessConfig = config['preprocessConfig']
-generalConfig = config['generalConfig']
+#with open('config_pre2017.yaml', 'r') as configFile:
+#     config = yaml.safe_load(configFile)
+#preprocessConfig = config['preprocessConfig']
+#generalConfig = config['generalConfig']
 
-foldername = preprocessConfig['DATA_IN_FOLDER']
+#foldername = preprocessConfig['DATA_IN_FOLDER']
 
 ##generalConfig["QCEWDIR"]=None
-df=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
-                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
-                   qwifolder=foldername + preprocessConfig['QWIDIR'],
-                     generalConfig=generalConfig,
-                          preprocessConfig=preprocessConfig,
-                   outfilename=generalConfig['COMBINED_DATA'],
-                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
-                   outfilepath = preprocessConfig['OUTPATH'],
-                year=generalConfig['YEAR'])
+#df=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
+#                   imputedfile=foldername + preprocessConfig['IMPUTECBP'],
+#                   qwifolder=foldername + preprocessConfig['QWIDIR'],
+#                     generalConfig=generalConfig,
+#                          preprocessConfig=preprocessConfig,
+#                   outfilename=generalConfig['COMBINED_DATA'],
+#                   diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
+#                   outfilepath = preprocessConfig['OUTPATH'],
+#                year=generalConfig['YEAR'])
 
 #df=pd.read_csv(generalConfig['COMBINED_DATA'])
 
-#print(adjdf.loc[dont_impute.index.tolist(),["emp3_qcew","emp3_cbp","estnum_cbp","emp3_qcew_source"]].head(12))
+##print(adjdf.loc[dont_impute.index.tolist(),["emp3_qcew","emp3_cbp","estnum_cbp","emp3_qcew_source"]].head(12))
 
-#count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="wages_cbp",newcolname="wageCBP")
+#count6dig_wages = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="wages")
+#count6dig_emp1 = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="emp1")
+#count6dig_emp2 = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="emp2",include_source=False)
+#count6dig_emp3 = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="emp3")
 
-#print(count6dig.head())
-# Filter and prepare 4-digit NAICS data
-#df4 = df[df['industry'].str.match(r"^[0-9]{4}[^0-9]{2}", na=False)]
+#print(count6dig_wages.head())
+##print(count6dig_emp2.head())
+##print(count6dig.head())
+## Filter and prepare 4-digit NAICS data
+#df4 = df[df['agglvl_code']==76].copy()
 #df4['geo4naics']=df4['geoindkey'].str.slice(stop=-2)
+#df4 = df4.merge(count6dig_wages, on=['geo4naics'], how='left')
+#df4 = df4.merge(count6dig_emp1, on=['geo4naics',"grouplevels","count6by4codes"], how='left')
+#df4 = df4.merge(count6dig_emp2, on=['geo4naics',"grouplevels","count6by4codes"], how='left')
+#df4 = df4.merge(count6dig_emp3, on=['geo4naics',"grouplevels","count6by4codes"], how='left')
+#df4['wagediff'] = df4['wages'].astype(float) - df4['wages_sum6by4'].astype(float)
+#df4['emp1diff'] = df4['emp1'].astype(float) - df4['emp1_sum6by4'].astype(float)
+#df4['emp2diff'] = df4['emp2'].astype(float) - df4['emp2_sum6by4'].astype(float)
+#df4['emp3diff'] = df4['emp3'].astype(float) - df4['emp3_sum6by4'].astype(float)
+
+#print(df4.loc[(df4["count6by4codes"]!=df4['emp3_missing6by4'])&(df4['emp3_missing6by4']>3),:].head())
+#df4.drop(columns={"emp1_qcew","emp2_qcew","emp3_qcew","emp3_qwi","emp1_qwi","disclosure_code","wages_cbp","wages_qcew","estnum_qcew","emp3_cbp","year_qtr_cbp","emp1_qwi_flag","emp3_qwi_flag","lwbd_emp_qwi_flag","avg_month_emp_wages_flag","grouplevels"},inplace=True)
 #print(df4.head())
-#df4 = df4.merge(count6dig, on='geo4naics', how='left')
-#df4['wagediff_cbp'] = df4['wages_cbp'].astype(float) - df4['wageCBP_sum6by4'].astype(float)
+
+#df4[df4['emp3'].notna()].to_csv(preprocessConfig["OUTPATH"]+"naics4data.csv")
+
 #count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6,variable="wages_cbp",newcolname="wageCBP")
 
 

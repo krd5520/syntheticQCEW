@@ -7,7 +7,6 @@ import yaml
 import random
 
 sys.path.append(os.path.abspath("./NAICS6_Pyfunctions/"))
-from getAggLevelSummaries import *
 from EmploymentFunctions import *
 from WageFunctions import *
 from NAICS6functions import *
@@ -28,6 +27,7 @@ def start(config):
     NAICS6time=0
     generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig = check_config(config)
     startime=time.time()
+    print('---------- Retrieving or Loading Data ----------')
     if generalConfig["SKIP_TO_MICRODATA"] is not None and generalConfig["SKIP_TO_MICRODATA"]:
         print('Reading in NAICS6 by County data from '+str(generalConfig["NAICS6_FILE"]))
         naics6df = pd.read_csv(str(generalConfig["NAICS6_FILE"]))  # , nrows=10000)
@@ -37,8 +37,6 @@ def start(config):
             print("Reading combined dataset from "+str(generalConfig['COMBINED_DATA']))
             df=pd.read_csv(generalConfig['COMBINED_DATA'],dtype=str)
             readinData=time.time()-startime
-            print(df.head())
-            print(df.columns)
         elif preprocessConfig is not None:
             print("Combining CBP and QWI datasets.")
             foldername = preprocessConfig['DATA_IN_FOLDER']
@@ -63,9 +61,9 @@ def start(config):
                     if os.listdir(foldername + preprocessConfig['QCEWDIR']) == []:
                         qcew=download_QCEW(generalConfig=generalConfig, preprocessConfig=preprocessConfig, savechunks=1,
                                       forcombine=True)
-                        print("download qcew")
+                        #print("download qcew")
                     if os.listdir(foldername+preprocessConfig['QCEWDIR'])==[]:
-                        print("qcew didn't save properly???")
+                        #print("qcew didn't save properly???")
                         qcew.to_csv(foldername+preprocessConfig['QCEWDIR'])
                 readinData = time.time() - startime
             else:
@@ -83,8 +81,8 @@ def start(config):
                                year=generalConfig['YEAR'])
             print("Combined file is saved: "+str(generalConfig['COMBINED_DATA']))
             createCombined=time.time()-createcombinedstart
-        print(df.head())
-        print(df.columns)
+        df=df[df["emp3"].notna()].copy() #remove ones missing emp3
+        print(f'---------- Combined Data Done: Time {createCombined} ----------')
         startNAICS6=time.time()
         naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig, df=df)
         NAICS6time=time.time()-startNAICS6

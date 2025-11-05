@@ -11,7 +11,8 @@ import sys
 import os
 
 sys.path.append(os.path.abspath('./'))
-from getAggLevelSummaries import *
+from GeneralFunctions import *
+from hierarchy_geoindkey import *
 
 
 
@@ -69,7 +70,7 @@ def dirichletparams_m1emp(sub6):
         row2 = np.repeat(1, len(row2))
     return np.maximum(row2.astype(float), 1e-10)
 
-def dirichletparams_wage(sub6):
+def dirichletparams_wages(sub6):
     ''' 
     Prepares parameters for Dirichlet distribution used in wage imputation.
     Similar to dirichletparams_m1emp but specifically for wage distribution.
@@ -121,7 +122,7 @@ def get_wage6_per4(subdf6,subdf4,rseed=None):
         subdf6.loc[unknown_indic, 'wage'] = remain_wage
     else:
         subdf6unknown = subdf6[unknown_indic]
-        rprop = np.random.dirichlet(dirichletparams_wage(sub6=subdf6unknown), size=1)
+        rprop = np.random.dirichlet(dirichletparams_wages(sub6=subdf6unknown), size=1)
         mask = (subdf6['qp1_nf'] == 'D') & (~subdf6['qp1_nf'].isna())
         subdf6.loc[mask, 'wage'] = np.round(remain_wage * rprop.flatten()[:sum(mask)])
     return subdf6

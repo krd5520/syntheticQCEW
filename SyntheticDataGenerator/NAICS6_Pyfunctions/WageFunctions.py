@@ -11,16 +11,16 @@ from formulaic import Formula
 import patsy
 import yaml
 sys.path.append(os.path.abspath('./'))
-from getAggLevelSummaries import *
+from hierarchy_geoindkey import *
 from GeneralFunctions import *
 #with open('config.yaml','r') as configFile:
 #    config = yaml.safe_load(configFile)
 #    wageConfig = config['wageConfig']
 
-def get_wage_model(df, emp_mat_adj,wageConfig):
+def get_wages_model(df, emp_mat_adj,wageConfig):
     '''
     What is the point?
-        get_wage_model() creates an OLS model that predicts wage differences based on:
+        get_wages_model() creates an OLS model that predicts wage differences based on:
         - CBP wage data
         - Employment counts
         - Sector and state effects
@@ -29,7 +29,7 @@ def get_wage_model(df, emp_mat_adj,wageConfig):
         2. emp_mat_adj - Adjusted employment matrix from employment functions
     Steps:
         1. Merge employment matrix with wage data
-        2. Filter to valid observations (non-missing wages_cbp_flag and wagediff)
+        2. Filter to valid observations (non-missing wages_cbp_flag and wagesdiff)
         3. Transformations:
            - Square root of wage difference
            - Numeric conversion of key variables
@@ -45,40 +45,28 @@ def get_wage_model(df, emp_mat_adj,wageConfig):
         model - statsmodels.OLS fitted model for wage prediction
     '''
     # Merge employment data with wage data
-    emp_mat_adj = pd.DataFrame(emp_mat_adj)
-    emp_mat_adj = emp_mat_adj.apply(lambda col: pd.to_numeric(col) if 'm' in col.name else col)
-    wagedf4 = pd.concat([
-        df.drop(columns=['geoindkey']),  
-        emp_mat_adj
-    ], axis=1)
+    #emp_mat_adj = pd.DataFrame(emp_mat_adj)
+    #emp_mat_adj = emp_mat_adj.apply(lambda col: pd.to_numeric(col) if 'm' in col.name else col)
+    #wagedf4 = df.merge(emp_mat_adj.concat([
+    #    df.drop(columns=['geoindkey']),
+    #    emp_mat_adj
+    #], axis=1)
+    wagedf4=df
     # Filter nans
-    wagedf4 = wagedf4[(wagedf4['wages_cbp_flag'].notna()) & (wagedf4['wages_cbp_flag'] != 'D') & (wagedf4['wagediff'].notna())]
-    # sqrt_wagediff is, uh, well, the sqrt of wagediff
+    #wagedf4 = wagedf4[(wagedf4['wages_cbp_flag'].notna()) & (wagedf4['wages_cbp_flag'] != 'D') & (wagedf4['wagesdiff'].notna())]
+    # sqrt_wagesdiff is, uh, well, the sqrt of wagesdiff
     # Also type conversions
-    wagedf4["sqrt_wagediff"]=wagedf4["wagediff"].astype(float) ** 0.5
-    wagedf4["wageCBP_missing6by4"]=wagedf4["wageCBP_missing6by4"].astype(float)
-    wagedf4["m3emp"]=wagedf4["m3emp"].astype(float)
-    # Define formula and fit initiial model
-    formula = wageConfig['OLS_FORMULA']
-    y_pre, X_pre = Formula(formula).get_model_matrix(wagedf4)
-    model_pre = sm.OLS(y_pre, X_pre).fit()
-    # Calculate Cook's Distance and Studentized Residuals
-    influence = OLSInfluence(model_pre)
-    cooks_d=influence.cooks_distance[0]
-    student_resid = influence.resid_studentized_internal
-    # Identify Outliers based on thresholds
-    outliers = [i for i, r in enumerate(student_resid) if r > wageConfig['OUTLIER_THRESH']]
-    influential_indices = [i for i, d in enumerate(cooks_d) if d > 1]
-    if influential_indices:
-        print("# of rows filtered due to influence (Cook's Distance):", len(influential_indices), '|', np.round((len(influential_indices)/len(wagedf4)),3) * 100, '%')
-    if outliers:
-        print("# of outliers filtered (Studentized Residuals):", len(outliers), '|', np.round((len(outliers)/len(wagedf4)),3) * 100, '%')
-    # Remove outliers
-    rows_to_drop = influential_indices + outliers
-    wagedf4 = wagedf4.drop(wagedf4.index[rows_to_drop])
-    # Refit
-    y,X = Formula(formula).get_model_matrix(wagedf4)
-    model = sm.OLS(y,X).fit()
+    stems=["emp1","emp2","emp3","wages"]
+    colstonumeric=[x for x in wagedf4.columns if (any(sub in x for sub in stems)&("source" not in x)&("flag" not in x))]
+    wagedf4.apply(lambda col: pd.to_numeric(col) if col.name in colstonumeric else col)
+
+    if "DIAGNOSTIC_PLOTS" in wageConfig:
+        diagplot=wageConfig["DIAGNOSTIC_PLOTS"]
+    else:
+        diagplot=None
+    model=get_model(wagedf4, wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,
+              return_summary_and_diagnostics=False)
+    print(model.summary())
     return model
 
 def get_wagemax(codes4naics, fulldf):
@@ -97,61 +85,61 @@ def get_wagemax(codes4naics, fulldf):
     # Initialize the output dataframe
     outdf = pd.DataFrame({
         "geoindkey": codes4naics,
-        "maxwage": np.nan,
+        "maxwages": np.nan,
         "geo3naics": codes4naics.str[:-3],
         "geo2naics": codes4naics.str[:-4],
         "geography": codes4naics.str[:-7]
     })
-    fulldf['wages_cbp'] = fulldf['wages_cbp'].astype(int)
+    fulldf['wages'] = fulldf['wages'].astype(float)
     # Try 3-digit NAICS level first
     tomergedf3 = fulldf[
         fulldf["geoindkey"].str.contains(r"_[0-9]{3}[^0-9]{3}", regex=True)
     ].copy()
     tomergedf3["geo3naics"] = tomergedf3["geoindkey"].str[:-3]
-    tomergedf3["wage_naics3"] = np.where(tomergedf3["wages_cbp_flag"] == "D", np.nan, tomergedf3["wages_cbp"])
-    tomergedf3 = tomergedf3[["geo3naics", "estnum", "wage_naics3"]]
+    tomergedf3["wages_naics3"] = np.where(tomergedf3["wages_source"].notna(), np.nan, tomergedf3["wages"])
+    tomergedf3 = tomergedf3[["geo3naics", "estnum", "wages_naics3"]]
     # Merge 3-digit data
     outdf = outdf.merge(tomergedf3, on='geo3naics', how='left', suffixes=('', '_naics3'))
     # For missing values, try 2-digit sector level
-    notmaxcodes = outdf[outdf['wage_naics3'].isna()]['geo2naics'].tolist()
+    notmaxcodes = outdf[outdf['wages_naics3'].isna()]['geo2naics'].tolist()
     fulldf['geo2naics'] = fulldf['geoindkey'].str[:-4]
     tomergedf2 = fulldf[fulldf['geo2naics'].isin(notmaxcodes) & 
                         fulldf['geoindkey'].str.contains(r"_[0-9]{2}[^0-9]{4}")].copy()
-    tomergedf2['wage_naics2'] = np.where(tomergedf2['wages_cbp_flag'] == 'D', np.nan, tomergedf2['wages_cbp'])
-    tomergedf2 = tomergedf2[['geo2naics', 'estnum', 'wage_naics2']]
+    tomergedf2['wages_naics2'] = np.where(tomergedf2['wages_source'].notna(), np.nan, tomergedf2['wages_cbp'])
+    tomergedf2 = tomergedf2[['geo2naics', 'estnum', 'wages_naics2']]
     # Calculate differences between sector and summed 3-digit wages
-    tomergedf3['wage_naics3'] = tomergedf3['wage_naics3'].astype(float)
+    tomergedf3['wages_naics3'] = tomergedf3['wages_naics3'].astype(float)
     tomergedf3['geo2naics'] = tomergedf3['geo3naics'].str[:-1]  # Extract sector codes
-    tomergedf3 = tomergedf3.groupby('geo2naics', as_index=False).agg(sumwage3=('wage_naics3', 'sum'))
+    tomergedf3 = tomergedf3.groupby('geo2naics', as_index=False).agg(sumwage3=('wages_naics3', 'sum'))
     tomergedf2 = tomergedf2.merge(tomergedf3, on='geo2naics', how='left')
-    tomergedf2['missing_wage_naics2'] = tomergedf2['wage_naics2'].astype(float) - tomergedf2['sumwage3']
-    tomergedf2 = tomergedf2[['geo2naics', 'missing_wage_naics2', 'estnum', 'wage_naics2']]
+    tomergedf2['missing_wages_naics2'] = tomergedf2['wages_naics2'].astype(float) - tomergedf2['sumwage3']
+    tomergedf2 = tomergedf2[['geo2naics', 'missing_wages_naics2', 'estnum', 'wages_naics2']]
     # Merge sector-level data
     outdf = outdf.merge(tomergedf2, on='geo2naics', how='left', suffixes=('', '_naics2'))
-    outdf['maxwage'] = outdf.apply(lambda row: row['wage_naics3'] if pd.notna(row['wage_naics3']) else row['missing_wage_naics2'], axis=1)
-    outdf = outdf.drop(columns=['wage_naics2'])
-    fulldf['wages_cbp']=fulldf['wages_cbp'].astype(int)
+    outdf['maxwages'] = outdf.apply(lambda row: row['wages_naics3'] if pd.notna(row['wages_naics3']) else row['missing_wages_naics2'], axis=1)
+    outdf = outdf.drop(columns=['wages_naics2'])
+    fulldf['wages']=fulldf['wages'].astype(float)
     # For remaining missing values, use county-wide totals
-    max_allind_allcounty = fulldf[fulldf['agglvl_code'] == 76]['wages_cbp'].max(skipna=True)
-    notmaxcodes = outdf[outdf['maxwage'].isna()]['geography'].tolist()
+    max_allind_allcounty = fulldf[fulldf['agglvl_code'] == 76]['wages'].max(skipna=True)
+    notmaxcodes = outdf[outdf['maxwages'].isna()]['geography'].tolist()
     tomergedfall = fulldf.copy()
     tomergedfall['geography'] = tomergedfall['geoindkey'].str[:-7]
     tomergedfall = tomergedfall[tomergedfall['geography'].isin(notmaxcodes)]
     tomergedfall = tomergedfall[tomergedfall['geoindkey'].str.contains('_------')]
     tomergedfall['wageall'] = tomergedfall.apply(
-        lambda row: max_allind_allcounty if row['wages_cbp_flag'] == 'D' else row['wages_cbp'], axis=1)
+        lambda row: max_allind_allcounty if row['wages_source']!="" else row['wages'], axis=1)
     tomergedfall = tomergedfall[['geography', 'estnum', 'wageall']]
     # Calculate county-level differences
     tomergedf2['geography'] = tomergedf2['geo2naics'].str[:-3]
-    tomergedf2 = tomergedf2.groupby('geography', as_index=False)['wage_naics2'].sum(min_count=1)
-    tomergedf2.rename(columns={'wage_naics2': 'sumwage2'}, inplace=True)
+    tomergedf2 = tomergedf2.groupby('geography', as_index=False)['wages_naics2'].sum(min_count=1)
+    tomergedf2.rename(columns={'wages_naics2': 'sumwage2'}, inplace=True)
     tomergedfall = tomergedfall.merge(tomergedf2, on="geography", how="left")
     tomergedfall['missingwageall'] = tomergedfall['wageall'].astype(float) - tomergedfall['sumwage2'].astype(float)
     tomergedfall = tomergedfall[['geography', 'missingwageall', 'estnum', 'wageall']]
     # Final merge and return
     outdf = outdf.merge(tomergedfall, on="geography", how="left", suffixes=("", "_allindustry"))
-    outdf['maxwage'] = outdf.apply(lambda row: row['missingwageall'] if pd.isna(row['maxwage']) else row['maxwage'], axis=1)
-    outdf = outdf[['geoindkey', 'maxwage']]
+    outdf['maxwages'] = outdf.apply(lambda row: row['missingwageall'] if pd.isna(row['maxwages']) else row['maxwages'], axis=1)
+    outdf = outdf[['geoindkey', 'maxwages']]
     return outdf
 
 def get_wagemin(codes4naics, fulldf):
@@ -167,9 +155,9 @@ def get_wagemin(codes4naics, fulldf):
     # Get 6-digit NAICS summaries
     tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6)
     # Create minwage column (0 if no data available)
-    tomerge6dig['minwage'] = np.where(tomerge6dig['wageCBP_sum6by4'].isna(), 0, tomerge6dig['wageCBP_sum6by4'])
+    tomerge6dig['minwages'] = np.where(tomerge6dig['wages_sum6by4'].isna(), 0, tomerge6dig['wages_sum6by4'])
     tomerge6dig['geoindkey'] = tomerge6dig['geo4naics'].astype(str) + "//"
-    tomerge6dig = tomerge6dig[['geoindkey', 'minwage']]
+    tomerge6dig = tomerge6dig[['geoindkey', 'minwages']]
     return tomerge6dig
 
 def get_maxmindf(df4dig, fulldf, emp_mat_adj):
@@ -196,7 +184,7 @@ def get_maxmindf(df4dig, fulldf, emp_mat_adj):
     # Merge all data
     wagedf4_maxmin = wagedf4.merge(maxwagedf, on="geoindkey", how="left") \
                             .merge(minwagedf, on="geoindkey", how="left")
-    wagedf4_maxmin['minwage'] = wagedf4_maxmin['minwage'].fillna(0)
+    wagedf4_maxmin['minwages'] = wagedf4_maxmin['minwages'].fillna(0)
     return wagedf4_maxmin
 
 def wagesFromModel(df, modelwage):
@@ -228,7 +216,7 @@ def wagesFromQWI(df, empmat):
     '''
     # Multiply employment by earnings
     empmat = empmat.astype(float)
-    earnbeg = df['avg_month_emp_wage'].astype(float)
+    earnbeg = df['avg_month_emp_wages'].astype(float)
     wages = np.sum(empmat, axis=1) * earnbeg.values/1000 #match the scale of wages_cbp
     return wages
 
@@ -244,17 +232,17 @@ def adjust_wagevalues(fitwagedf, dfmaxmin):
         DataFrame with adjusted wage values
     '''
     # Merge with min/max bounds
-    maxmindf = dfmaxmin[['geo4naics', 'minwage', 'maxwage']].copy()
+    maxmindf = dfmaxmin[['geo4naics', 'minwages', 'maxwages']].copy()
     fitwagedf = fitwagedf.merge(maxmindf, on='geo4naics', how='left')
     # Apply constraints
-    fitwagedf['wage'] = fitwagedf['wage'].clip(
-        lower=fitwagedf['minwage'].astype(float),
-        upper=fitwagedf['maxwage'].astype(float)
+    fitwagedf['wages'] = fitwagedf['wages'].clip(
+        lower=fitwagedf['minwages'].astype(float),
+        upper=fitwagedf['maxwages'].astype(float)
     )
-    fitwagedf = fitwagedf.drop(columns=['minwage', 'maxwage'])
+    fitwagedf = fitwagedf.drop(columns=['minwages', 'maxwages'])
     return fitwagedf
 
-def get_wages4(df4, empmat, wagemodel,useEarnQWI=False, count6digdf=None, maxmindf=None):
+def get_wages4(df4, empmat, wagemodel,useEarnQWI=True, count6digdf=None, maxmindf=None):
     '''
     What is the point?
         get_wages4() is the main function for wage estimation that:
@@ -272,32 +260,41 @@ def get_wages4(df4, empmat, wagemodel,useEarnQWI=False, count6digdf=None, maxmin
         DataFrame with estimated wages and method indicators
     '''
     # First try using CBP data
-    wages_cbpAvailable = df4['wages_cbp_flag'] != 'D'
-    df4['wage'] = df4['wages_cbp']
-    useModel = ~wages_cbpAvailable
+    wages_Available = df4['wages_source']!=""
+    print(wages_Available.shape)
+    #df4['wages'] = df4['wages']
+    useModel = ~wages_Available
+    print(sum(useModel))
     # Optionally use QWI earnings data
     if useEarnQWI:
         print("Number which uses QWI:", end=" ")
-        EarnBegAvailable = df4['avg_month_emp_wage_flag'].astype(float) == 1.0
-        useQWI = (EarnBegAvailable) & (~wages_cbpAvailable)
-        print(sum(useQWI))
-        df4.loc[useQWI, 'wage'] = wagesFromQWI(df4[useQWI], empmat[useQWI])
-        useModel = ~EarnBegAvailable & ~wages_cbpAvailable
+        print(df4['avg_month_emp_wages_flag'].count_values())
+        EarnBegAvailable = df4['avg_month_emp_wages_flag'].astype(float) == 1.0
+        useQWI = (EarnBegAvailable) & (~wages_Available)
+        print(f"Using avg_month_emp_wages from QWI for {sum(useQWI)} rows")
+        df4.loc[useQWI, 'wages'] = wagesFromQWI(df4[useQWI], empmat[useQWI])
+        useModel = ~EarnBegAvailable & ~wages_Available
     # Convert empmat to DataFrame
-    empmat_df = pd.DataFrame(empmat, columns=['m1emp', 'm2emp', 'm3emp'])
+    #empmat_df = pd.DataFrame(empmat, columns=['emp1', 'emp2', 'emp3'])
     # Use model for remaining cases
-    df4 = pd.concat([df4, empmat_df], axis=1)
+    #df4 = pd.concat([df4, empmat_df], axis=1)
     if wagemodel is None and sum(useModel)>0:
         raise Exception("Without a model there are "+str(sum(useModel)+" missing wage values at the county by NAICS-4 level.\\ You must include a wageConfig in your config file with subfields OLS_FORMULA, COOKS_THRESH, and OUTLIER_THRESH."))
     else:
         print("Number of cells which use Model:", sum(useModel))
         predicted_wages = wagesFromModel(df4[useModel], wagemodel)
-        df4.loc[useModel, 'wage'] = predicted_wages + df4.loc[useModel, 'wageCBP_sum6by4'].values
+        if "wagesdiff" in wagemodel.model.endog_names:
+            df4.loc[useModel, 'wages'] = predicted_wages + df4.loc[useModel, 'wages_sum6by4'].values
+            df4.loc[useModel,"wages_source"]="model"
+        else:
+            df4.loc[useModel, 'wages'] = predicted_wages
+            df4.loc[useModel, "wages_source"] = "model"
         # Add method indicators
     df4['usewageModel'] = useModel.astype(int)
     if useEarnQWI:
         df4.loc[useQWI, 'usewageModel'] = 2
+        df4.loc[useQWI,"wages_source"]="qwi_and_emps"
     # Apply bounds, round, and return
     df4 = adjust_wagevalues(df4,maxmindf)
-    df4['wage'] = df4['wage'].round()
+    df4['wages'] = df4['wages'].round()
     return df4

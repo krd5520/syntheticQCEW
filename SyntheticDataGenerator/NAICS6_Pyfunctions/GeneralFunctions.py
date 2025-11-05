@@ -16,6 +16,18 @@ def transform_feature(feature, df):
         base_var = feature.split('(',1)[1].split(')')[0].strip()
         category = feature.split('[T.')[1].split(']')[0].strip()
         return (df.loc[:,base_var] == category).astype(float)
+    elif 'C(' in feature:
+        base_var = feature.split('(',1)[1].split(')')[0].strip()
+        category = feature.split('[')[1].split(']')[0].strip()
+        return (df.loc[:,base_var] == category).astype(float)
+    elif feature.split("[",1)[0] in df.columns:
+        base_var=feature.split("[",1)[0]
+        category = feature.split('[')[1].split(']')[0].strip()
+        return (df.loc[:, base_var] == category).astype(float)
+    elif feature.split("(",1)[1].split("[",1)[0] in df.columns:
+        base_var=feature.split("(",1)[1].split("[",1)[0]
+        category = feature.split('[')[1].split(']')[0].strip()
+        return (df.loc[:,base_var] == category).astype(float)
     elif 'np.sqrt' in feature:
         internalvar = feature.split('(')[1].split(')')[0].strip()
         return np.sqrt(df.loc[:,internalvar].astype(float))
@@ -35,8 +47,10 @@ def feature_to_colname(feature, df):
     elif 'poly' in feature and "(" in feature:
         internal_var=feature.split("(",1)[1].split(',')[0]
         return feature_to_colname(internal_var,df)
-    elif '[T.' in feature:
+    elif '[T.' in feature or feature.strip().startswith("C("):
         return feature_to_colname(feature.split('(',1)[1].split(')')[0].strip(),df)
+    elif '[' in feature:
+        return feature_to_colname(feature.split('[', 1)[0].strip(), df)
     elif 'np.sqrt' in feature:
         return feature_to_colname(feature.split('(')[1].split(')')[0].strip(),df)
     elif 'np.log' in feature:
@@ -149,19 +163,20 @@ def custom_predict(data, ols_model,rseed=None):
     for feature in model_features:
         if feature == 'Intercept':
             # Add intercept column
-            X['Intercept'] = 1
+            #X['Intercept'] = 1
+            continue
         else:
             featurecolname=feature_to_colname(feature,df)
             missing_mask=df[featurecolname].isna()
             pred_idx=list(set(pred_idx)-set(df.loc[missing_mask,:].index.tolist()))
-
+    nopred_idx=set(df.index.tolist())-set(pred_idx)
     X = pd.DataFrame(index=pred_idx)
     df=df.loc[pred_idx,:]
     # Process each feature in the model 
     for feature in model_features:
         # Skip intercept - we'll add it later
         if feature == 'Intercept':
-            continue
+            X['Intercept'] = 1
         elif "poly(" in feature or "poly (" in feature: #polynomial terms
             X = polynomial_handling(feature, X, df)
         # Handle interaction terms
@@ -206,7 +221,12 @@ def custom_predict(data, ols_model,rseed=None):
         # Calculate (X @ cov_matrix) @ X.T for each row
         x_cov = chunk @ cov_matrix
         se_fit[i:i+chunk_size] = np.sqrt(np.sum(x_cov * chunk, axis=1))
-    return pred, se_fit
+    fullpred=pd.DataFrame(index=data.index.tolist())
+    fullpred['pred']=np.nan
+    fullpred['se']=np.nan
+    fullpred.loc[pred_idx,'pred']=pred
+    fullpred.loc[pred_idx,'se']=se_fit
+    return fullpred['pred'], fullpred['se']
 
 def possible_variables(data,response):
     naidx=data[response].isna()
@@ -226,9 +246,10 @@ def possible_variables(data,response):
 
 
 def subset_model_data(data,formula_str):
-    # Retrieve OLS formula from config.yaml
+    # Retrieve variables from OLS formula
     checkvars = Formula(formula_str).required_variables
     for cvar in checkvars:
+        #if it can be easily made from geoindkey, make it
         if cvar not in data.columns and cvar in ["sector",'naics2',"naics3","naics4"]:
             indkey=data['geoindkey'].astype(str).str.replace('[0-9]*_',"",regex=True)
             if cvar=='sector':
@@ -240,15 +261,17 @@ def subset_model_data(data,formula_str):
             else:
                 data['naics4'] = indkey.astype(str).str[:4]
         assert cvar in data.columns, f"{cvar} needed for ols formula but is not in the data columns."
-        if "s"+cvar in data.columns:
-            data=data[data["s"+cvar]==1] #not suppressed in QWI
-        elif cvar+"_nf" in data.columns:
-            data=data[data[cvar+"_nf"].isin(["G","H","J"])] #is noise-infused but present in CBP
-        if "C("+cvar in formula_str.replace(" ",""):
-            iscat=True
-        else:
-            data[cvar]=data[cvar].astype(float)
-    data=data[list(checkvars)]
+        if cvar+"_flag" in data.columns:
+            if data[cvar+"_flag"].dtype=="object":
+                data=data[data["s"+cvar]==1].copy() #not suppressed in QWI
+            else:
+                data = data[data[cvar + "_nf"].isin(["G", "H", "J"])].copy()
+        if "C("+cvar in formula_str.replace(" ",""): #if it is categorical
+            continue
+        else: #otherwise see if it should be made into a float
+            if data[cvar].astype(str).str.isnumeric().any():
+                data[cvar]=data[cvar].astype(float)
+    data=data[list(checkvars)].copy()
     return data[data.notna().all(axis=1)]
 
 def save_diagnostic_plots(model,title,filename):
@@ -272,6 +295,24 @@ def save_diagnostic_plots(model,title,filename):
     plt.savefig(filename,dpi=300,bbox_inches='tight')
     plt.close()
     print("Save regression diagnostic plots as "+filename)
+
+def features_from_formula_str(formula_str,data):
+
+    if "~" in formula_str:
+        lhs, rhs=formula_str.split("~",1)
+        response=feature_to_colname(lhs.strip(),data)
+    elif "=" in formula_str:
+        lhs, rhs = formula_str.split("=", 1)
+        response=feature_to_colname(lhs.strip(),data)
+    else:
+        rhs=formula_str
+        response=None
+    predictors=[]
+    splitplus=rhs.split("+")
+    for feature in splitplus:
+        cname=feature_to_colname(feature,data)
+        predictors.append(cname)
+    return list(set(predictors)), response
 
 def get_model(data,formula_str,cooks_thresh,studentresid_thresh,diagnostic_plots=None,output_removed=False,return_summary_and_diagnostics=False):
     '''
@@ -299,6 +340,8 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,diagnostic_plots
         3. Can save the dataset the model is fit on as a csv for more exploration of prediction models and
             save the diagnostic plots from the final model
     '''
+
+
     # Step 1
     # Retrieve OLS formula from config.yaml
     formula=formula_str
