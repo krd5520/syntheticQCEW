@@ -3,10 +3,12 @@
 /workspace.xml
 SyntheticDataGenerator/NAICS6_Pyfunctions/__pychache__/
 SyntheticDataGenerator/DataDiag/
+SyntheticDataGenerator/DataDiag/DataIn/
+SyntheticDataGenerator/DataDiag/DataIn/ImputeCBP/
+
+
 Datasets/
 SyntheticDataGenerator/.idea/
-SyntheticDataGenerator/GUIcode/
-
 *.pyc
 *$py.class
 
