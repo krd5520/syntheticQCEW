@@ -4,6 +4,10 @@ from statsmodels.stats.outliers_influence import OLSInfluence
 from formulaic import Formula
 import sys
 import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
 sys.path.append(os.path.abspath('./'))
 from GeneralFunctions import *
 
@@ -74,16 +78,17 @@ def get_m1emp_model(df,employmentConfig):
     #subqwifull = subqwifull.drop(subqwifull.index[rows_to_drop])
     ## Rebuild design matrices without influential points and perform final model fitting.
     #y, X = Formula(formula).get_model_matrix(subqwifull)
+    df=df.copy()
     if "DIAGNOSTIC_PLOTS" in employmentConfig:
         diagplots=employmentConfig['DIAGNOSTIC_PLOTS']
     else:
         diagplots=None
-    model = get_model(df,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
+    model = get_model(df,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
     print(model.summary())
     # end. return fitted model.
     return model
 
-def check_lwbd_emp_qwi(empvals, stablevals, stableFlag):
+def check_lwbd_emp_qwi(empvals, stablevals):
     '''
     What is the point?
         check_lwbd_emp_qwi() is used as a helper function in get_m1emp() and get_m2emp().
@@ -106,10 +111,14 @@ def check_lwbd_emp_qwi(empvals, stablevals, stableFlag):
         1. empvals  -  np.ndarray of floats
             - Corrected employment values
     '''
+    if isinstance(stablevals,pd.Series):
+        stabnan=stablevals.isna()
+    else:
+        stabnan=np.isnan(stablevals)
     empvals = np.array(empvals, dtype=float)
     stablevals = np.array(stablevals, dtype=float)
-    stableFlag = np.array(stableFlag, dtype=float)
-    empfitokay = np.isnan(stableFlag) | (stableFlag != 1) | ((stableFlag == 1) & (empvals >= stablevals))
+    #stableFlag = np.array(stableFlag, dtype=float)
+    empfitokay = np.isnan(stablevals) | ((~stabnan) & (empvals >= stablevals))
     empvals[~empfitokay] = stablevals[~empfitokay]
     return empvals
 
@@ -151,7 +160,7 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
         np.random.seed(rseed)
     m1emp = df["emp1"]
     # Identify rows to be imputed
-    missm1indicator = df["emp1_source"].isna()
+    missm1indicator = df["emp1"].isna()
 
     missingsub = df[missm1indicator]
     # Get model predictions and standard errors for missing values
@@ -160,15 +169,13 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     ##check index is now filled
     predidx=predm1emp[predm1emp.notna()].index.values
     missingidx=missingsub.index.values
-    #print(predidx)
-    #print(missingidx)
-    #print(sum(predidx-missingidx))
+
 
     if set(predidx)!=set(missingidx):
         print(f'lenpredix {len(predidx)}, lenmissingidx {len(missingidx)}')
         print("predidx!=missingidx")
         #print(list(set(missingidx)-set(predidx)))
-        print(df.loc[list(set(missingidx)-set(predidx)),["state","naics2","estnum","emp3","emp3_source","emp1_sum6by4","emp1_missing6by4","emp1","emp1_qcew","emp1_qwi"]].head())
+        print(df.loc[list(set(missingidx)-set(predidx)),["state","naics2","estnum","emp3","emp3_source","emp1_sum6by4","emp1_missing6by4","emp1"]].head())
 
     # Generate predicted values with random noise based on standard errors
     m1empfit = np.random.normal(
@@ -176,10 +183,19 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
         scale=sem1emp, # Scale by prediction uncertainty
         size=sum(missm1indicator)
     )
+    response = m1empmodel.model.endog_names
+    if "np.sqrt" in response:
+        m1empfit=m1empfit**2
+    elif "np.log" in response:
+        m1empfit=np.exp(m1empfit)
+
+    if "emp1diff" in response:
+        m1empfit=m1empfit+missingsub['emp1_sum6by4']
     # Ensure no negative employment and validate against stable values
     m1empfit[m1empfit < 0] = 0
     m1emp[missm1indicator]=m1empfit
-    m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"], missingsub["lwbd_emp_qwi_flag"])
+    m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"])
+    #m1emp[missm1indicator]=adjust_varvalues(m1emp[missm1indicator], dfmaxmin, stabvals=None, variable="emp1")
     # Round to whole numbers
 
     output = np.round(m1emp.astype(float), 0)
@@ -188,7 +204,7 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
         return output, missm1indicator
     return output
 
-def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=None):
+def get_m2emp(m1emp, m3emp, stabval, noisecoef, rseed=None):
     '''
     What is the point?
         get_m1emp() is used as a helper function in get_employmentCounts4().
@@ -241,7 +257,7 @@ def get_m2emp(m1emp, m3emp, stabval, stabF, noisecoef, rseed=None):
     m2emp[nonzeroindic] = m2emp_nz
     #Handle negative values and consult check_lwbd_emp_qwi()
     m2emp[m2emp < 0] = np.where((m1emp[m2emp < 0] == 0) | (m3emp[m2emp < 0] == 0), 0, 1)
-    m2emp = check_lwbd_emp_qwi(m2emp, stabval, stabF)
+    m2emp = check_lwbd_emp_qwi(m2emp, stabval)
     #return
     return np.round(m2emp, 0)
 
@@ -270,7 +286,6 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_
     '''
     if rseed is not None:
         np.random.seed(rseed)
-
     #qwiemp3_qwiAvailable = ~df4["emp3_qwi"].isna()
     #df4.loc[~qwiemp3_qwiAvailable, "emp3_qwi"] = df4.loc[~qwiemp3_qwiAvailable, "emp"]
     if include_m1emp_indicator:
@@ -280,7 +295,8 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_
     else:
         m1emp = get_m1emp(df=df4, m1empmodel=m1emp_model, include_indicator=False)
     m3emp=df4['emp3']
-    m2emp = get_m2emp(m1emp, m3emp, df4['lwbd_emp_qwi'].values, df4['lwbd_emp_qwi_flag'].values, noisecoef=m2emp_noisecoef)
+
+    m2emp = get_m2emp(m1emp, m3emp, df4['lwbd_emp_qwi'].values, noisecoef=m2emp_noisecoef)
     empMat = pd.DataFrame({
     'geoindkey': df4['geoindkey'],
     'm1emp': m1emp,
@@ -288,8 +304,52 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_
     'm3emp': m3emp,
     'm1empFromModel': m1empFlag
     })
-    return empMat
 
+    check_emp2=False #used for internal validatation while testing code.
+    if check_emp2:
+        check_m2emp(df4,m2emp)
+
+    df4.loc[df4["emp1_source"]=="model","emp1"]=m1emp
+    #print(f'inside employmentFunctions emp2_source counts:\n {df4["emp2_source"].value_counts(dropna=False)}')
+    df4.loc[df4["emp2_source"].isna(), "emp2_source"] = "emp2_noise"
+    df4.loc[df4["emp2"].isna(),"emp2"]=m2emp[df4["emp2"].isna()]
+    return empMat, df4
+
+def check_m2emp(df,m2emp,justqcew=False,plotsave="DataDiag/DiagnosticPlots/check_m2emp_plot.png",bins=45):
+    #if justqcew:
+    #    df4=df[(df["emp1_source"]=="qcew")&(df["emp2_source"]=="qcew")&(df["emp3_source"]=="qcew"),:].copy()
+    #else:
+    #    df4 = df[(df["emp1_source"] != "model") & (df["emp2_source"] == "qcew") ,
+    #          :].copy()
+    df4=df.loc[df["emp1_source"]=="qcew"]
+    emp2_diff = df4["emp2"] - m2emp[df4.index.values]
+    print("Checking emp2.... emp2_diff")
+    print(emp2_diff.describe())
+    print("abs(emp2_diff)")
+    print(emp2_diff.abs().describe())
+    # find cases with zeros
+    for empvar in ["emp1","emp2","emp3"]:
+        df4[empvar+"_zero"]=(df4[empvar]==0)
+    print("zero combinations")
+    print(df4.groupby(['emp1_zero',"emp2_zero","emp3_zero"]).size().reset_index(name="Count"))
+    m1emp_nz = df4.loc[(df4["emp1"] > 0) & (df4["emp3"] > 0), "emp1"]
+    m3emp_nz = df4.loc[(df4["emp3"] > 0) & (df4["emp1"] > 0), "emp3"]
+    noisescalar = 2/(m1emp_nz+m3emp_nz)#(2 * np.abs(m1emp_nz - m3emp_nz)) / (m1emp_nz + m3emp_nz)
+    midpoint=((m3emp_nz-m1emp_nz)/2)+m1emp_nz
+    print("midpoint summary")
+    print(midpoint.describe())
+    #noisescalar[noisescalar==0]=1
+    print("noisescalar summary")
+    print(noisescalar.describe())
+    check_norm=((m2emp[midpoint.index.values]-midpoint)*noisescalar)
+    print("check norm summary")
+    print(check_norm.describe())
+    plot_hist_with_normal(check_norm,filename=plotsave,bins=bins)
+    return (df,m2emp)
+
+
+
+    #noisesd = np.sqrt((noisecoef * 2 * np.abs(m1emp_nz - m3emp_nz)) / (m1emp_nz + m3emp_nz))
 def adjust_countytotal_qwi(valdf, sumdf):
     '''
     What is the point?
@@ -318,11 +378,11 @@ def adjust_countytotal_qwi(valdf, sumdf):
     )
     # Keep only counties with known totals
     filtered_df = groupdf[groupdf['stcnty'].isin(sumdf.loc[HasSumIndic, 'stcnty'])]
-    filtered_df = filtered_df[['stcnty', 'm1emp', 'm1empFromModel']]
+    filtered_df = filtered_df[['stcnty', 'emp1', 'm1empFromModel']]
     # Calculate sum of m1emp and counts for "Model"/"QWI" categories
     result_df = filtered_df.groupby(['stcnty', 'm1empFromModel']).agg(
-        summ1emp=('m1emp', 'sum'),
-        CellCount=('m1emp', 'size')
+        summ1emp=('emp1', 'sum'),
+        CellCount=('emp1', 'size')
     ).reset_index()
     # Pivot to wide format (columns like summ1emp_Model, CellCount_QWI)
     groupeddf = result_df.pivot_table(
@@ -371,11 +431,12 @@ def adjust_countytotal_qwi(valdf, sumdf):
     # - Equal distribution if Model = 0
     valdf['ProposedM1emp'] = np.where(
         (valdf['Model'] == 0) | valdf['Model'].isna(),
-        valdf['m1emp'] + (valdf['MissingModel'] / valdf['CellCount_Model']),
-        valdf['m1emp'] + (valdf['MissingModel'] * valdf['m1emp'] / valdf['Model'])
+        valdf['emp1'] + (valdf['MissingModel'] / valdf['CellCount_Model']),
+        valdf['emp1'] + (valdf['MissingModel'] * valdf['emp1'] / valdf['Model'])
     )
     # Apply adjustments only to imputed records
-    valdf.loc[(valdf['m1empFromModel'] == 1) & valdf['Data_Emp'].notna(), 'm1emp'] = valdf['ProposedM1emp']
+    valdf.loc[(valdf['m1empFromModel'] == 1) & valdf['Data_Emp'].notna(), 'emp1'] = valdf['ProposedM1emp']
     # Ensure non-negative, round and return
-    valdf['m1emp'] = valdf['m1emp'].clip(lower=0)
-    return valdf['m1emp'].round(0)
+    valdf['emp1'] = valdf['emp1'].clip(lower=0)
+    return valdf['emp1'].round(0)
+

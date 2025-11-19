@@ -1,0 +1,44 @@
+employmentConfig:
+  COOKS_THRESH: 1.0
+  M2EMP_NOISECOEF: 1.69
+  OUTLIER_THRESH: 4.3
+  RSEED: 1
+generalConfig:
+  API_KEY: 0a71b2828ce455dbb120cebbb499b0b5bec91962
+  COMBINED_DATA: ''
+  NAICS6_FILE: ''
+  QTR: 1
+  SEED: 1
+  SKIP_TO_MICRODATA: false
+  STATES:
+  - AL
+  - PA
+  - NJ
+  - RI
+  - CA
+  - IN
+  - OH
+  - NM
+  YEAR: 2014
+microdataConfig:
+  EST_SEED: 1
+  GAM_SCALE: 20
+  GAM_SHAPE: 3
+  M2EMP_NOISECOEF: 1.69
+  OUTPATH: ''
+  SUBSET_OUTPATH: ''
+preprocessConfig:
+  CBPDATA: ''
+  DATA_IN_FOLDER: DataDiag/DataIn/
+  IMPUTECBP: ''
+  OUTPATH: ''
+  QCEWDIR: ''
+  QWIDATA: ''
+quarterConfig:
+  COOKS_THRESH: 1.0
+  OUTLIER_THRESH: 4.3
+  RSEED: 1
+wageConfig:
+  COOKS_THRESH: 1.0
+  OUTLIER_THRESH: 4.3
+  RSEED: 1

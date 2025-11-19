@@ -35,7 +35,11 @@ def start(config):
     else:
         if os.path.exists(generalConfig['COMBINED_DATA']) and os.path.isfile(generalConfig['COMBINED_DATA']):
             print("Reading combined dataset from "+str(generalConfig['COMBINED_DATA']))
-            df=pd.read_csv(generalConfig['COMBINED_DATA'],dtype=str)
+            df=pd.read_csv(generalConfig['COMBINED_DATA'],
+                           usecols=['agglvl_code', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
+                                    'emp3', 'emp2', 'emp1', 'wages',"year","qtr", 'emp1_source',"emp2_source","emp3_source",
+                                    "wages_source","geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5"]
+                           )
             readinData=time.time()-startime
         elif preprocessConfig is not None:
             print("Combining CBP and QWI datasets.")
@@ -79,9 +83,38 @@ def start(config):
                                     preprocessConfig=preprocessConfig,
                                outfilepath=preprocessConfig['OUTPATH'],
                                year=generalConfig['YEAR'])
+            df=df[['agglvl_code','emp3_cbp','wages_cbp','estnum_cbp',
+                 'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
+                 'emp3', 'emp2', 'emp1', 'wages', 'year_qtr',"year","qtr","estnum",
+                   'emp1_source',"emp2_source","emp3_source","wages_source",
+                   "geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
+                   "emp1_qwi","emp1_qcew"]].copy()
             print("Combined file is saved: "+str(generalConfig['COMBINED_DATA']))
             createCombined=time.time()-createcombinedstart
-        df=df[df["emp3"].notna()].copy() #remove ones missing emp3
+
+        #df.drop(columns=["Unnamed: 0", "estnum_qcew","disclosure_code","estnum_source",
+        #                 'emp1_qwi_flag', 'emp3_qwi_flag','lwbd_emp_qwi_flag', 'avg_month_emp_wages_flag',
+        #                'emp1_qcew',
+        #                 'emp2_qcew', 'emp3_qcew', 'wages_qcew'
+        #                 ], inplace=True, errors="ignore")
+        #print(df.columns)
+        df['year_qtr']=df['year'].astype(float)+(df["qtr"].astype(float)/4)
+
+        tofloatcols = ['emp3_cbp', 'wages_cbp', 'estnum_cbp', 'year_qtr_cbp',
+                 'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
+                 'emp3', 'emp2', 'emp1', 'wages', 'year_qtr']
+        for x in tofloatcols:
+            if x in df.columns:
+                df[x] = df[x].astype(float)
+        df.dropna(axis=0,how='any',subset='emp3',inplace=True) #remove ones missing emp3
+        #print(f"NA count per column, out of {df.shape}")
+        #print(df.isna().sum())
+        #for cname in [x for x in df.columns if "_source" in x]:
+        #    print(df[cname].value_counts(dropna=False))
+
+        #print("after drop na")
+        #print(pd.crosstab(df["emp1_source"],df["wages_source"],dropna=False))
+        #print(pd.crosstab(df['emp1_source'],df['agglvl_code'],dropna=False))
         print(f'---------- Combined Data Done: Time {createCombined} ----------')
         startNAICS6=time.time()
         naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig, df=df)

@@ -1,4 +1,8 @@
 Please dowload the imputed (2016) CBP file and place it in this directory (ImputeCBP)
 
-The file can be found here:
+The efsy_cbp_2016.csv file can be found here:
 https://doi.org/10.3886/E117464V1
+
+
+The efsy_cbp_2016_lw_up.csv file can be found at:
+https://fpeckert.me/cbp/

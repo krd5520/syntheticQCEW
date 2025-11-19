@@ -25,16 +25,18 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,df=None
         df = pd.read_csv(generalConfig['COMBINED_DATASET'], dtype=str)  # , nrows=100000)
 
         df = df.iloc[:, 1:]  # Remove index
+    fulldf=df.copy()
     # dfsave = df.copy()
-    tofloatcols=['agglvl_code','estnum_qcew', 'emp1_qcew', 'emp2_qcew', 'emp3_qcew',
-                 'wages_qcew','emp3_cbp', 'wages_cbp','estnum_cbp', 'year_qtr_cbp',
-                 'emp1_qwi', 'emp3_qwi','lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
-                 'emp3','emp2',  'emp1', 'wages', 'year_qtr']
-    for x in tofloatcols:
-        if x in df.columns:
-            df[x]=df[x].astype(float)
+    #tofloatcols=['agglvl_code','estnum_qcew', 'emp1_qcew', 'emp2_qcew', 'emp3_qcew',
+    #             'wages_qcew','emp3_cbp', 'wages_cbp','estnum_cbp', 'year_qtr_cbp',
+    #             'emp1_qwi', 'emp3_qwi','lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
+    #             'emp3','emp2',  'emp1', 'wages', 'year_qtr']
+    #for x in tofloatcols:
+    #    if x in df.columns:
+    #        df[x]=df[x].astype(float)
+    #del x, tofloatcols
 
-    df.drop(columns=["Unnamed: 0","estnum_qcew"],inplace=True,errors="ignore")
+    #df.drop(columns=["Unnamed: 0","estnum_qcew"],inplace=True,errors="ignore")
 
 
     # In 2016 this NAICS 4 has no corresponding NAICS 6
@@ -54,81 +56,88 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,df=None
     # Extract 6-digit NAICS
     df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
     df6['geo4naics'] = df6['geoindkey'].str[:-2]
-    df6['geo5naics'] = df6['geoindkey'].str[:-1]
-    #df6 = df6[['geoindkey', 'geo4naics', 'geo5naics', 'state', 'cnty', 'estnum', 'wages_cbp', 'wages_cbp_flag', 'emp']]
-    # Get summary counts for distribution
-    count6dig_wages = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="wages")
-    count6dig_emp1 = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="emp1")
-    count6dig_emp2 = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="emp2", include_source=False)
-    count6dig_emp3 = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="emp3")
+    #df6['geo5naics'] = df6['geoindkey'].str[:-1]
 
-    # Filter and prepare 4-digit NAICS data
     df4 = df[df['agglvl_code'] == 76].copy()
     df4['geo4naics'] = df4['geoindkey'].str.slice(stop=-2)
     df4['geo3naics'] = df4['geoindkey'].str.slice(stop=-3)
-    #merge with summary data
-    df4 = df4.merge(count6dig_wages, on=['geo4naics'], how='left',indicator=True)
-    df4.rename(columns={"_merge":"_merge_wagesI"},inplace=True)
-    df4 = df4.merge(count6dig_emp1, on=['geo4naics', "grouplevels", "count6by4codes"], how='left',indicator=True,suffixes=["_wagesI","_emp1I"])
-    df4.rename(columns={"_merge": "_merge_emp1I"}, inplace=True)
-    df4 = df4.merge(count6dig_emp2, on=['geo4naics', "grouplevels", "count6by4codes"], how='left',indicator=True,suffixes=["","_emp2I"])
-    df4.rename(columns={"_merge": "_merge_emp2I"}, inplace=True)
-    df4 = df4.merge(count6dig_emp3, on=['geo4naics', "grouplevels", "count6by4codes"], how='left',indicator=True,suffixes=["","_emp3I"])
-    df4.rename(columns={"_merge": "_merge_emp3I"}, inplace=True)
+    #print("inside naics6 function")
+    #print(pd.crosstab(df4["emp1_source"], df4["emp2_source"], dropna=False))
 
-    weirdones=df4.loc[df4["_merge_wagesI"]=="left_only"]
-    geo6naicsweird=df6.loc[df6["geo4naics"].isin(weirdones['geo4naics']),:]
-    if len(geo6naicsweird)==0:
-        print("fixing it")
-        for cname in ['wages','emp1','emp2','emp3']:
-            df4.loc[df4[cname+"_sum6by4"].isna(), cname+"_sum6by4"] = 0
-            df4.loc[df4[cname + "_missing6by4"].isna(), cname + "_missing6by4"] = 0
-        df4.loc[df4['count6by4codes'].isna(), 'count6by4codes'] = 0
-    else:
-        for cname in ['emp1', 'emp2', 'emp3', 'wages']:
-            print(f'count na in {cname}_sum6by4 {sum(df4.loc[:, cname + "_sum6by4"].isna())}')
-            print(f'in {cname}_missing6by4 {sum(df4.loc[:, cname + "_missing6by4"].isna())}')
-        raise Exception(f"Something wrong\n {geo6naicsweird.head()}")
+    for vname in ["emp1","wages"]:
+        count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable=vname)
+        df4 = df4.merge(count6dig, on=['geo4naics'], how='left', indicator=True,suffixes=["","_droplater"])
+        weirdones = df4.loc[df4["_merge"] == "left_only"]
+        geo6naicsweird = df6.loc[df6["geo4naics"].isin(weirdones['geo4naics']), :]
+        if len(geo6naicsweird) == 0:
+            df4.loc[df4[vname + "_sum6by4"].isna(), vname + "_sum6by4"] = 0
+            df4.loc[df4[vname + "_missing6by4"].isna(), vname + "_missing6by4"] = 0
+            df4.loc[df4[vname + "_propmissing6by4"].isna(), vname + "_propmissing6by4"] = 1
+            df4.loc[df4['count6by4codes'].isna(), 'count6by4codes'] = 0
+        else:
+            print(f'count na in {vname}_sum6by4 {sum(df4.loc[:, vname + "_sum6by4"].isna())}')
+            print(f'in {vname}_missing6by4 {sum(df4.loc[:, vname + "_missing6by4"].isna())}')
+            raise Exception(f"Something wrong\n {geo6naicsweird.head()}")
+        df4.drop(columns=["_merge"],inplace=True)
+        df4.drop(columns=[dropcol for dropcol in df.columns if "_droplater" in dropcol],errors="ignore")
+        df4[vname+"diff"]=df4[vname].astype(float) - df4[vname+'_sum6by4'].astype(float)
+        #print(df4[[vname+"diff",vname+"_missing6by4",vname+"_propmissing6by4",vname+"_sum6by4",vname]].describe())
+        #print(df4.loc[(df4[vname+"diff"]<0)&(df4[vname+"_missing6by4"]>0),[vname,vname+"_source",vname+"diff",vname+"_missing6by4",vname+"_propmissing6by4",vname+"_sum6by4"]].head())
+        negdiff=df4.loc[
+            (df4[vname + "diff"] < 0) & (df4[vname + "_missing6by4"] > 0), [vname, vname + "_source", vname + "diff",
+                                                                            vname + "_missing6by4",
+                                                                            vname + "_propmissing6by4",
+                                                                            vname + "_sum6by4"]]
 
-    df4.drop(columns={"disclosure_code", "estnum_qcew", "year_qtr_cbp", "emp1_qwi_flag", "emp3_qwi_flag",
-                      "grouplevels","_merge_wagesI","_merge_emp1I","_merge_emp2I","_merge_emp3I"}, inplace=True, errors="ignore")
-
-    #df4.drop(columns=["_merge_wagesI","_merge_emp1I","_merge_emp2I","_merge_emp3I"],inplace=True,errors="ignore")
-    #print(df6.loc[df6["geo4naics"].isin(weird4naics),:].head())
-
-    df4['wagesdiff'] = df4['wages'].astype(float) - df4['wages_sum6by4'].astype(float)
-    df4['emp1diff'] = df4['emp1'].astype(float) - df4['emp1_sum6by4'].astype(float)
-    df4['emp2diff'] = df4['emp2'].astype(float) - df4['emp2_sum6by4'].astype(float)
-    df4['emp3diff'] = df4['emp3'].astype(float) - df4['emp3_sum6by4'].astype(float)
-
+        print(negdiff.head())
+        print(negdiff.shape)
+        print(negdiff.describe())
+    del weirdones,geo6naicsweird, df6
+    #print(df4[[""]])
 
     ############## Employment Counts ################
     print('---------- Employment Configuration ----------')
     # Display all current employmentConfig settings
     for key, value in employmentConfig.items():
         print(f"{key}: {value}")
+
+    del key, value
+    #print("inside naics6 function 2")
+    #print(pd.crosstab(df4["emp1_source"],df4["emp2_source"],dropna=False))
+
     # Step 1: Create employment prediction model
     print('---------- Imputing Employment Data ----------')
     m1empfit = get_m1emp_model(df=df4,employmentConfig=employmentConfig)
+    #print(pd.crosstab(df4["emp1_source"], df4["emp2_source"], dropna=False))
+
     # Step 2: Generate monthly employment counts
-    empMat = get_employmentCounts4(
+    empMat, df4 = get_employmentCounts4(
         df4,
         m1emp_model=m1empfit,
         m2emp_noisecoef=employmentConfig['M2EMP_NOISECOEF'],
         rseed=employmentConfig['RSEED'],
         include_m1emp_indicator=True
     )
+
     # Step 3: Adjust to match county totals
-    adjustdf = pd.DataFrame(empMat)
-    adjustdf = adjustdf.apply(lambda col: pd.to_numeric(col, errors='coerce') if col.name and 'm' in col.name else col)
-    adjustm1emp = adjust_countytotal_qwi(valdf=adjustdf, sumdf=df[df["industry"] == "------"])
-    empMatA = empMat.copy()
-    empMatA['m1emp']=adjustm1emp
+    adjustdf = adjust_geo4naics_varvalues(fitdf=df4, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp1",fulldf=fulldf)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp2",fulldf=fulldf)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp3",fulldf=fulldf)
+    adjustdf['m1empFromModel']=empMat['m1empFromModel']
+
+    adjustdf = adjustdf.apply(lambda col: pd.to_numeric(col, errors='coerce') if col.name in ['emp1','emp2','emp3','wages'] else col)
+
+    #adjustm1emp = adjust_countytotal_qwi(valdf=adjustdf, sumdf=df[df["industry"] == "------"])
+    empMatA = adjustdf[['geoindkey','emp1','emp2','emp3','emp1_source','emp2_source','emp3_source','m1empFromModel','minemp1','minemp1_source']].copy()
+
+    #empMatA['emp1']=adjustm1emp
+    del empMat, adjustdf#, adjustm1emp
     #=-empMatA.iloc[:, 1] = adjustm1emp  # Update with adjusted values
     #print(empMatA.head())
-    empMatA.rename(columns={'m1emp':'emp1','m2emp':'emp2','m3emp':'emp3'},inplace=True)
+    #empMatA.rename(columns={'m1emp':'emp1','m2emp':'emp2','m3emp':'emp3'},inplace=True)
 
     perwagemodel=df4.merge(empMatA,on=["geoindkey"],how="left",suffixes=["_wdf",""])
+    perwagemodel.loc[(perwagemodel['emp2'].notna())&(perwagemodel['emp2_source'].isna()),'emp2_source']="noise_impute"
     perwagemodel.loc[(perwagemodel['emp2'].notna())&(perwagemodel['emp2_source'].isna()),'emp2_source']="noise_impute"
     perwagemodel.to_csv("DataDiag/PythonPreprocessOut/perwagemodel.csv")
     ## Sanity check on na's
@@ -137,7 +146,9 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,df=None
     #        print(perwagemodel[cname].value_counts(dropna=False))
     #    else:
     #        print(f'na count:{sum(perwagemodel[cname].isna())}, and not na count {sum(perwagemodel[cname].notna())}')
-
+    #stophere=False #used for checkpoint when testing the employment code
+    #if stophere:
+    #    raise Exception(f"stop here for check")
     if wageConfig is not None:
         ################## WAGES #######################
         print('---------- Wage Configuration ----------')
@@ -161,22 +172,29 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,df=None
     })
     # Step 3: Impute wage values
     wagesout = get_wages4(df4=df4, empmat=empMatwage, wagemodel=wagefit_sub, useEarnQWI=True, maxmindf=wages_maxmin)
+
     # Prepare final 4 digit output
     df4imp = wagesout.copy().assign(
         #EmpScale=lambda x: np.where(x['m3emp'] == 0, 1, x['emp'] / x['m3emp'].astype(float)),
-        geo4naics=lambda x: x['geoindkey'].str[:-2],
-        m1empFromModel=empMatA.iloc[:, 4].astype(float)  # 5th column (0-based index 4)
+        geo4naics=lambda x: x['geoindkey'].str.slice(stop=-2),
+        m1empFromModel=empMatA.loc[:, 'm1empFromModel'].astype(float)  # 5th column (0-based index 4)
     )
+
+    df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
+    df6['geo4naics'] = df6['geoindkey'].str[:-2]
+    df6['geo5naics'] = df6['geoindkey'].str[:-1]
 
     ################## Get NAICS6 By County Aggregates #######################
     print('---------- Getting NAICS6 by County Aggregates ----------')
     print('This may take a while, please be patient...')
     # Distribute values from 4-digit to 6-digit NAICS
-    naics6df = get_6naics_all(df=df6, df4n=df4imp, codes4summary=count6dig)
+    print(f'df4imp head before get_6naics_all in generate_NAICS.py:\n{df4imp.head()}')
+    naics6df = get_6naics_all(df6, df4imp, codes4summary=count6dig)
+    print(naics6df.columns)
     # Final formatting and output
-    naics6df = naics6df.iloc[:, :5].join(naics6df[['m1emp', 'm3emp', 'wages']])
+    naics6df = naics6df.iloc[:, :5].join(naics6df[['emp1', 'emp3', 'wages']])
     naics6df.head(50)
-    naics6df.to_csv(str(generalConfig["NAICS6_PATH"]),index=False)
+    naics6df.to_csv(str(generalConfig["NAICS6_FILE"]),index=False)
     return(naics6df)
 
 

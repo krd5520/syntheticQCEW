@@ -52,9 +52,6 @@ def get_wages_model(df, emp_mat_adj,wageConfig):
     #    emp_mat_adj
     #], axis=1)
     wagedf4=df
-    # Filter nans
-    #wagedf4 = wagedf4[(wagedf4['wages_cbp_flag'].notna()) & (wagedf4['wages_cbp_flag'] != 'D') & (wagedf4['wagesdiff'].notna())]
-    # sqrt_wagesdiff is, uh, well, the sqrt of wagesdiff
     # Also type conversions
     stems=["emp1","emp2","emp3","wages"]
     colstonumeric=[x for x in wagedf4.columns if (any(sub in x for sub in stems)&("source" not in x)&("flag" not in x))]
@@ -64,7 +61,7 @@ def get_wages_model(df, emp_mat_adj,wageConfig):
         diagplot=wageConfig["DIAGNOSTIC_PLOTS"]
     else:
         diagplot=None
-    model=get_model(wagedf4, wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,
+    model=get_model(wagedf4, wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,include_multicolinearity=True,
               return_summary_and_diagnostics=False)
     print(model.summary())
     return model
@@ -105,7 +102,7 @@ def get_wagemax(codes4naics, fulldf):
     fulldf['geo2naics'] = fulldf['geoindkey'].str[:-4]
     tomergedf2 = fulldf[fulldf['geo2naics'].isin(notmaxcodes) & 
                         fulldf['geoindkey'].str.contains(r"_[0-9]{2}[^0-9]{4}")].copy()
-    tomergedf2['wages_naics2'] = np.where(tomergedf2['wages_source'].notna(), np.nan, tomergedf2['wages_cbp'])
+    tomergedf2['wages_naics2'] = np.where(tomergedf2['wages_source'].notna(), np.nan, tomergedf2['wages'])
     tomergedf2 = tomergedf2[['geo2naics', 'estnum', 'wages_naics2']]
     # Calculate differences between sector and summed 3-digit wages
     tomergedf3['wages_naics3'] = tomergedf3['wages_naics3'].astype(float)
@@ -173,7 +170,7 @@ def get_maxmindf(df4dig, fulldf, emp_mat_adj):
     '''
     # Merge employment data with wage data
     emp_mat_adj = pd.DataFrame(emp_mat_adj)
-    emp_mat_adj = emp_mat_adj.apply(lambda col: pd.to_numeric(col) if 'm' in col.name else col)
+    emp_mat_adj = emp_mat_adj.apply(lambda col: pd.to_numeric(col) if col.name in ["emp1","emp2","emp3","wages"] else col)
     wagedf4 = pd.concat([
         df4dig.drop(columns=['geoindkey']),  # Drop geoindkey column
         emp_mat_adj
@@ -187,7 +184,7 @@ def get_maxmindf(df4dig, fulldf, emp_mat_adj):
     wagedf4_maxmin['minwages'] = wagedf4_maxmin['minwages'].fillna(0)
     return wagedf4_maxmin
 
-def wagesFromModel(df, modelwage):
+def wagesFromModel(df, modelwage, formula_str=None):
     '''
     What is the point?
         wagesFromModel() generates wage predictions from the fitted model
@@ -201,7 +198,15 @@ def wagesFromModel(df, modelwage):
     # Get predictions and standard errors
     pred, se_fit = custom_predict(df, modelwage)
     # Generate random normal values and square them
-    wagefit = np.random.normal(loc=pred, scale=se_fit) ** 2
+    wagefit = np.random.normal(loc=pred, scale=se_fit)
+    response=modelwage.model.endog_names
+    if "np.sqrt" in response:
+        wagefit = wagefit ** 2
+    elif "np.log" in response:
+        wagefit = np.exp(wagefit)
+
+    if "wagesdiff" in response:
+        wagefit = wagefit + df['wages_sum6by4']
     return wagefit
 
 def wagesFromQWI(df, empmat):
@@ -242,7 +247,7 @@ def adjust_wagevalues(fitwagedf, dfmaxmin):
     fitwagedf = fitwagedf.drop(columns=['minwages', 'maxwages'])
     return fitwagedf
 
-def get_wages4(df4, empmat, wagemodel,useEarnQWI=True, count6digdf=None, maxmindf=None):
+def get_wages4(df4, empmat, wagemodel,formula_str=None,useEarnQWI=True, count6digdf=None, maxmindf=None):
     '''
     What is the point?
         get_wages4() is the main function for wage estimation that:
@@ -260,16 +265,20 @@ def get_wages4(df4, empmat, wagemodel,useEarnQWI=True, count6digdf=None, maxmind
         DataFrame with estimated wages and method indicators
     '''
     # First try using CBP data
-    wages_Available = df4['wages_source']!=""
-    print(wages_Available.shape)
+    print(df4['wages_source'].value_counts(dropna=False))
+
+    wages_Available = df4['wages'].notna()
+    print(f'wgaes_Available shape {wages_Available.shape}')
     #df4['wages'] = df4['wages']
     useModel = ~wages_Available
-    print(sum(useModel))
+    print(f"useModel sum {sum(useModel)}")
     # Optionally use QWI earnings data
     if useEarnQWI:
         print("Number which uses QWI:", end=" ")
-        print(df4['avg_month_emp_wages_flag'].count_values())
-        EarnBegAvailable = df4['avg_month_emp_wages_flag'].astype(float) == 1.0
+        print(df4['avg_month_emp_wages'].isna().value_counts(dropna=False))
+        print(sum(df4["avg_month_emp_wages"].isna()))
+        EarnBegAvailable = df4['avg_month_emp_wages'].notna()
+        print(sum(EarnBegAvailable))
         useQWI = (EarnBegAvailable) & (~wages_Available)
         print(f"Using avg_month_emp_wages from QWI for {sum(useQWI)} rows")
         df4.loc[useQWI, 'wages'] = wagesFromQWI(df4[useQWI], empmat[useQWI])
@@ -282,13 +291,21 @@ def get_wages4(df4, empmat, wagemodel,useEarnQWI=True, count6digdf=None, maxmind
         raise Exception("Without a model there are "+str(sum(useModel)+" missing wage values at the county by NAICS-4 level.\\ You must include a wageConfig in your config file with subfields OLS_FORMULA, COOKS_THRESH, and OUTLIER_THRESH."))
     else:
         print("Number of cells which use Model:", sum(useModel))
-        predicted_wages = wagesFromModel(df4[useModel], wagemodel)
-        if "wagesdiff" in wagemodel.model.endog_names:
-            df4.loc[useModel, 'wages'] = predicted_wages + df4.loc[useModel, 'wages_sum6by4'].values
-            df4.loc[useModel,"wages_source"]="model"
-        else:
-            df4.loc[useModel, 'wages'] = predicted_wages
-            df4.loc[useModel, "wages_source"] = "model"
+        predicted_wages = wagesFromModel(df4[useModel], wagemodel,formula_str=formula_str)
+
+        response = wagemodel.model.endog_names
+        if "np.sqrt" in response:
+            predicted_wages = predicted_wages ** 2
+        elif "np.log" in response:
+            predicted_wages = np.exp(predicted_wages)
+
+        if "wagesdiff" in response:
+            predicted_wages = predicted_wages + df4.loc[useModel, 'wages_sum6by4'].values
+
+        #print(f"shape of predicted_wages {predicted_wages.shape}")
+        df4.loc[useModel,"wages"]=predicted_wages
+        df4.loc[useModel,"wages_source"]="model"
+
         # Add method indicators
     df4['usewageModel'] = useModel.astype(int)
     if useEarnQWI:

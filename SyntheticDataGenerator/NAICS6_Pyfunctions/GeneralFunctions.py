@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import PolynomialFeatures
-from statsmodels.stats.outliers_influence import OLSInfluence
+from statsmodels.stats.outliers_influence import OLSInfluence, variance_inflation_factor
 from formulaic import Formula
 import statsmodels.api as sm
 from statsmodels.graphics.gofplots import qqplot
@@ -165,6 +165,22 @@ def custom_predict(data, ols_model,rseed=None):
             # Add intercept column
             #X['Intercept'] = 1
             continue
+        elif "*" in feature in feature:
+            featsplit=feature.split("*",1)
+            featurecolname1=feature_to_colname(featsplit[0],df)
+            featurecolname2=feature_to_colname(featsplit[1],df)
+            missing_mask1=df[featurecolname1].isna()
+            missing_mask2 = df[featurecolname2].isna()
+            temp_pred_idx = set(pred_idx) - set(df.loc[missing_mask1, :].index.tolist())
+            pred_idx = list(temp_pred_idx - set(df.loc[missing_mask2].index.tolist()))
+        elif ":" in feature in feature:
+            featsplit=feature.split(":",1)
+            featurecolname1=feature_to_colname(featsplit[0],df)
+            featurecolname2=feature_to_colname(featsplit[1],df)
+            missing_mask1=df[featurecolname1].isna()
+            missing_mask2 = df[featurecolname2].isna()
+            temp_pred_idx = set(pred_idx) - set(df.loc[missing_mask1, :].index.tolist())
+            pred_idx=list(temp_pred_idx-set(df.loc[missing_mask2].index.tolist()))
         else:
             featurecolname=feature_to_colname(feature,df)
             missing_mask=df[featurecolname].isna()
@@ -209,6 +225,7 @@ def custom_predict(data, ols_model,rseed=None):
 
     # Generate predictions
     pred = ols_model.predict(X)
+
 
     # Calculate standard errors of prediction
     cov_matrix = ols_model.cov_params().values
@@ -269,8 +286,9 @@ def subset_model_data(data,formula_str):
         if "C("+cvar in formula_str.replace(" ",""): #if it is categorical
             continue
         else: #otherwise see if it should be made into a float
-            if data[cvar].astype(str).str.isnumeric().any():
-                data[cvar]=data[cvar].astype(float)
+            pass
+            #if data[cvar].astype(str).str.isnumeric().any():
+            #    data[cvar]=data[cvar].astype(float)
     data=data[list(checkvars)].copy()
     return data[data.notna().all(axis=1)]
 
@@ -293,7 +311,7 @@ def save_diagnostic_plots(model,title,filename):
     plt.suptitle(title,fontsize=12,y=1.05)
     plt.tight_layout()
     plt.savefig(filename,dpi=300,bbox_inches='tight')
-    plt.close()
+    plt.close('all')
     print("Save regression diagnostic plots as "+filename)
 
 def features_from_formula_str(formula_str,data):
@@ -314,7 +332,7 @@ def features_from_formula_str(formula_str,data):
         predictors.append(cname)
     return list(set(predictors)), response
 
-def get_model(data,formula_str,cooks_thresh,studentresid_thresh,diagnostic_plots=None,output_removed=False,return_summary_and_diagnostics=False):
+def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicolinearity=False,diagnostic_plots=None,output_removed=False,return_summary_and_diagnostics=False):
     '''
     What is the point?
         get_model() creates an OLS model that predicts values based on various
@@ -382,9 +400,18 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,diagnostic_plots
         else:
             print("# of outliers filtered (Studentized Residuals):", len(outliers), '|', np.round((len(outliers)/len(subdf)),3) * 100, '%')
     rows_to_drop = influential_indices + outliers
-    subdffull = subdf.drop(subdf.index[rows_to_drop])
+
+    del X_pre, y_pre, model_pre
     # Rebuild design matrices without influential points and perform final model fitting.
-    y, X = Formula(formula).get_model_matrix(subdffull)
+    y, X = Formula(formula).get_model_matrix(subdf.drop(subdf.index[rows_to_drop]))
+    if include_multicolinearity:
+        if return_summary_and_diagnostics:
+            vifdf, multtext = find_multicollinearity(X, return_text=True)
+            outliertext=outliertext+multtext
+        else:
+            vifdf= find_multicollinearity(X, return_text=False)
+
+
     model = sm.OLS(y, X).fit()
     if Config['DIAGNOSTIC_PLOTS'] is not None:
         save_diagnostic_plots(model,formula_str,Config['DIAGNOSTIC_PLOTS'])
@@ -468,10 +495,12 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
         tempdata = data.copy()
 
 
+
         if adjust_source: #adjusting from one data source to another
             if formula is None:
                 formula = response+"~."
-            subdata=tempdata.loc[~tempdata.loc[:,response].isna(),:].copy()
+            usenewsource=data.loc[:,response].isna()
+            subdata=tempdata.loc[~usenewsource,:].copy()
         else: #adjusting CBP for quarter
             tempdata['year_qtr_diff'] = tempdata['year_qtr_cbp'].astype(float) - tempdata['year_qtr'].astype(float)
 
@@ -510,8 +539,8 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
             print(model.summary())
 
             #dataset with missing response values
-            no_response=data.loc[data.loc[:,response].isna(),:].copy()
-            pred, se_fit=custom_predict(no_response, model, rseed=rseed)
+            #no_response=data.loc[data.loc[:,response].isna(),:].copy()
+            pred, se_fit=custom_predict(tempdata[usenewsource], model, rseed=rseed)
             #responsefit = np.random.normal(
             #    loc=pred,  # Center at predicted values
             #    scale=se_fit,  # Scale by prediction uncertainty
@@ -519,12 +548,10 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
             #)
 
 
-            data.loc[no_response.index.tolist(), response] = np.round(pred,decimals=0)
-            not_na_mask=~np.isnan(pred)
-            new_source_index=[idx for idx,nabool in zip(no_response.index.tolist(),not_na_mask) if not nabool]
+            data.loc[usenewsource, response] = np.round(pred,decimals=0)
             if response+"_source" not in data.columns:
                 data.loc[:,response+"_source"]=""
-            data.loc[no_response.index.tolist(),response+"_source"]=source.lower()
+            data.loc[usenewsource,response+"_source"]=source.lower()
             data.loc[data[response].isna(),response+"_source"]=""
 
 
@@ -542,3 +569,93 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
             data.loc[subdata.index.tolist(), response_stem+"_cbp"] = model.fittedvalues()
 
         return data
+
+
+def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False,ignore_intercept=True):
+    """
+    Identify variables with multicollinearity using Variance Inflation Factor (VIF).
+
+    Parameters:
+        df (pd.DataFrame): DataFrame containing features (and optionally the target).
+        target (str): Optional target column name to exclude.
+        vif_threshold (float): VIF threshold above which variables are considered multicollinear.
+
+    Returns:
+        pd.DataFrame: Table of VIF values sorted descending.
+    """
+    # Drop target if provided
+    if target and target in df.columns:
+        X = df.drop(columns=[target])
+    else:
+        X = df.copy()
+
+    # Add constant term for intercept
+    #X = sm.add_constant(X)
+
+    # Calculate VIF for each variable
+    vif_data = pd.DataFrame()
+    vif_data["Variable"] = X.columns
+    vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+    if ignore_intercept:
+        vif_data=vif_data.loc[vif_data["Variable"]!="Intercept",:].copy()
+
+    # Remove the constant from results
+    vif_data = vif_data[vif_data["Variable"] != "const"].reset_index(drop=True)
+
+    # Sort and flag variables with high VIF
+    vif_data = vif_data.sort_values("VIF", ascending=False)
+    high_vif = vif_data[vif_data["VIF"] > vif_threshold]
+
+
+    if return_text:
+        if high_vif.empty:
+            outtext=f"\nVariables with VIF > {vif_threshold} (potential multicollinearity): None detected"
+        else:
+            outtext=f"\nVariables with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
+
+        return vif_data,outtext
+    else:
+        print(f"\nVariables with VIF > {vif_threshold} (potential multicollinearity):")
+        if high_vif.empty:
+            print("None detected.")
+        else:
+            print(high_vif)
+        return vif_data
+
+def plot_hist_with_normal(series, filename="histogram.png", bins=30):
+        """
+        Plot a histogram of a pandas Series with a normal density curve overlay.
+
+        Parameters:
+            series (pd.Series): Input data.
+            filename (str): Output filename for the saved PNG.
+            bins (int): Number of bins for the histogram.
+        """
+        # Drop missing values
+        series = series.dropna()
+
+        # Compute mean and standard deviation
+        mean = series.mean()
+        std = series.std()
+
+        # Create histogram
+        plt.figure(figsize=(8, 5))
+        count, bins_edges, _ = plt.hist(series, bins=bins, density=True, alpha=0.6, color='skyblue', edgecolor='black')
+
+        # Create normal density curve
+        x = np.linspace(series.min(), series.max(), 200)
+        y = norm.pdf(x, mean, std)
+        plt.plot(x, y, 'r-', linewidth=2, label='Normal PDF')
+
+        # Add labels and title
+        plt.xlabel("Value")
+        plt.ylabel("Density")
+        plt.title(f"Histogram with Normal Curve (mean={mean:.2f}, std={std:.2f})")
+        plt.legend()
+
+        # Save the plot
+        plt.tight_layout()
+        plt.savefig(filename, dpi=300)
+        plt.close('all')
+        print(f"Saved histogram with normal curve as '{filename}'")
+

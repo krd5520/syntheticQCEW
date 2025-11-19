@@ -52,7 +52,7 @@ def get_m3emp6_all(df,df4n):
                 np.where(
                     x['EmpScale'].isna(),
                     x['emp'],
-                    x['m3emp']
+                    x['emp3']
                 )
             )
         )
@@ -65,7 +65,7 @@ def dirichletparams_m1emp(sub6):
     Prepares parameters for Dirichlet distribution used in employment imputation.
     Handles zero-sum cases by returning uniform distribution parameters.
     '''
-    row2 = sub6['m3emp'].values.copy()
+    row2 = sub6['emp3'].values.copy()
     if sum(row2) == 0:
         row2 = np.repeat(1, len(row2))
     return np.maximum(row2.astype(float), 1e-10)
@@ -75,28 +75,43 @@ def dirichletparams_wages(sub6):
     Prepares parameters for Dirichlet distribution used in wage imputation.
     Similar to dirichletparams_m1emp but specifically for wage distribution.
     '''
-    row1 = sub6['m3emp'].values.copy()
+    row1 = sub6['emp3'].values.copy()
     if sum(row1) == 0:  
         row1 = np.repeat(1, len(row1))
     return np.maximum(row1.astype(float), 1e-10)
 
-def get_m1emp6_per4(df,df4n,rseed=None):
+def get_m1emp6_per4(df6n,df4n,rseed=None):
     '''
     Distributes month 1 employment from 4-digit to 6-digit NAICS level using
     random proportional allocation based on Dirichlet distribution.
     '''
     if rseed is not None:
         np.random.seed(rseed)
-    # Get Dirichlet parameters based on m3emp distribution
-    m1empparams=dirichletparams_m1emp(df)
-    # Generate random proportions
-    rprops = np.random.dirichlet(m1empparams, size=1)
-    if len(df) > 1:  # Multiple 6-digit codes
-        # Split the m1emp value proportionally using rprops
-        df['m1emp'] = np.round(rprops.flatten() * df4n['m1emp'].values[0]).astype(float)
-    elif len(df) == 1:  # Single 6-digit code
-        df['m1emp'] = df4n['m1emp'].values[0]
-    return df
+        # Calculate remaining wage after accounting for known values
+    remain_emp1 = float(df4n['emp1'].sum() - df6n['emp1'].astype(float).sum())
+
+    #remain_emp1 = float(df4n['emp1'].sum() - df['emp1'].astype(float).sum())
+    # Handle negative remainders (data consistency check)
+    if not np.isnan(remain_emp1):
+        if float(remain_emp1) < 0:
+            print("WARNING: remainders are negative!")
+            codes = ','.join(df6n['geoindkey'].astype(str).tolist())
+            print(f"Remainders: emp1 {float(remain_emp1)} Codes: {codes}")
+            print(f'Head of df4n\n {df4n[["geoindkey","minemp1","minemp1_source","emp1","emp1_source"]].head()}')
+            print(f'Head of df6n\n {df6n[["geoindkey","minemp1","minemp1_source","emp1","emp1_source"]].head()}')
+    # subdf6['wages'] = subdf6['q'] # Start with known values
+    unknown_indic = (df6n['emp1'].isna())
+    # Distribute remaining wage to suppressed entries
+    if len(df6n[unknown_indic]) == 1:
+        df6n.loc[unknown_indic, 'emp1'] = remain_emp1
+        df6n.loc[unknown_indic, 'emp1_source'] = "remainder"
+    else:
+        subdf6unknown = df6n[unknown_indic]
+        rprop = np.random.dirichlet(dirichletparams_m1emp(sub6=subdf6unknown), size=1)
+        mask = (df6n['emp1'].isna())  # & (~subdf6['qp1_nf'].isna())
+        df6n.loc[mask, 'emp1'] = np.round(remain_emp1 * rprop.flatten()[:sum(mask)])
+        df6n.loc[mask, 'emp1_source'] = "dirichlet_divider"
+    return df6n
     
 def get_wage6_per4(subdf6,subdf4,rseed=None):
     '''
@@ -108,23 +123,25 @@ def get_wage6_per4(subdf6,subdf4,rseed=None):
     if rseed is not None:
         np.random.seed(rseed)
     # Calculate remaining wage after accounting for known values
-    remain_wage = float(subdf4['wage'].sum() - subdf6['qp1'].astype(float).sum())
+    remain_wage = float(subdf4['wages'].sum() - subdf6['wages'].astype(float).sum())
     # Handle negative remainders (data consistency check)
     if not np.isnan(remain_wage):
         if float(remain_wage) < 0:
             print("WARNING: remainders are negative!")
             codes = ','.join(subdf6['geoindkey'].astype(str).tolist())
             print(f"Remainders: wage {float(remain_wage)} Codes: {codes}")
-    subdf6['wage'] = subdf6['qp1'] # Start with known values
-    unknown_indic = (subdf6['qp1_nf'] == 'D')
+    #subdf6['wages'] = subdf6['q'] # Start with known values
+    unknown_indic = (subdf6['wages'].isna())
     # Distribute remaining wage to suppressed entries
     if len(subdf6[unknown_indic]) == 1:
-        subdf6.loc[unknown_indic, 'wage'] = remain_wage
+        subdf6.loc[unknown_indic, 'wages'] = remain_wage
+        subdf6.loc[unknown_indic, 'wages_source'] = "remainder"
     else:
         subdf6unknown = subdf6[unknown_indic]
         rprop = np.random.dirichlet(dirichletparams_wages(sub6=subdf6unknown), size=1)
-        mask = (subdf6['qp1_nf'] == 'D') & (~subdf6['qp1_nf'].isna())
-        subdf6.loc[mask, 'wage'] = np.round(remain_wage * rprop.flatten()[:sum(mask)])
+        mask = (subdf6['wages'].isna())# & (~subdf6['qp1_nf'].isna())
+        subdf6.loc[mask, 'wages'] = np.round(remain_wage * rprop.flatten()[:sum(mask)])
+        subdf6.loc[mask, 'wages_source'] = "dirichlet_divider"
     return subdf6
 
 def get_6naics_per4(naics4dig,df6,df4imp,rseed=None):
@@ -139,17 +156,17 @@ def get_6naics_per4(naics4dig,df6,df4imp,rseed=None):
     subdf6 = df6[df6['geo4naics'] == naics4dig].copy()
     subdf4 = df4imp[df4imp['geo4naics'] == naics4dig].copy()
     # Step 1: Employment imputation
-    subdf6emp = get_m1emp6_per4(df=subdf6,df4n=subdf4,rseed=rseed)
+    subdf6emp = get_m1emp6_per4(df6n=subdf6,df4n=subdf4,rseed=rseed)
     # Step 2: Wage imputation (with fallback for empty groups)
     if len(subdf6emp) == 0:
         subdf6wage = subdf6.copy()
-        subdf6wage['m1emp'] = np.nan
-        subdf6wage['m3emp'] = np.nan
-        subdf6wage['wage'] = np.nan
+        subdf6wage['emp1'] = np.nan
+        subdf6wage['emp3'] = np.nan
+        subdf6wage['wages'] = np.nan
     else:
         subdf6wage = get_wage6_per4(subdf6=subdf6emp,subdf4=subdf4)
     # Cleanup before returning
-    subdf6wage = subdf6wage.drop(columns=['qp1', 'qp1_nf', 'emp', 'geo5naics'])
+    #subdf6wage = subdf6wage.drop(columns=['qp1', 'qp1_nf', 'emp', 'geo5naics'],errors="ignore")
     return subdf6wage
 
 def process_chunk(x, df6_toget, df4n):
@@ -167,18 +184,19 @@ def get_6naics_all(df, df4n, codes4summary, rseed=None):
         np.random.seed(rseed)
     timestart1 = time.time()
     # Handle simple cases (1 6-digit code per 4-digit)
-    codesNOTtoget = codes4summary['geo4naics'][codes4summary['Count6Codes'] == 1]
-    df4forjoin = df4n[['geo4naics', 'm1emp', 'm3emp', 'wage']].copy()
+    codesNOTtoget = codes4summary['geo4naics'][codes4summary['count6by4codes'] == 1]
+    df4forjoin = df4n[['geo4naics', 'emp1','emp2', 'emp3', 'wages']].copy()
     df6_onecodeper4 = (
         df[df['geo4naics'].isin(codesNOTtoget)]
-        .merge(df4forjoin, on='geo4naics', how='inner')
-        [['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum', 'm1emp', 'm3emp', 'wage']]
+        .merge(df4forjoin, on='geo4naics', how='inner',suffixes=["_naics6",""])
     )
+    df6_onecodeper4=df6_onecodeper4[['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum', 'emp1','emp2', 'emp3', 'wages']]
     # Prepare complex cases for parallel processing
-    df6_toget = get_m3emp6_all(
-        df=df[~df['geo4naics'].isin(codesNOTtoget)],
-        df4n=df4n
-    )
+    df6_toget = df[~df['geo4naics'].isin(codesNOTtoget)]
+    #get_m3emp6_all(
+    #    df=df[~df['geo4naics'].isin(codesNOTtoget)],
+    #    df4n=df4n
+    #)
     test4dig = df6_toget['geo4naics'].unique()
     print(f"Execution time: {time.time() - timestart1:.4f} seconds")
     # Parallel processing setup
