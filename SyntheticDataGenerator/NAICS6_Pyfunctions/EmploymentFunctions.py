@@ -44,46 +44,18 @@ def get_m1emp_model(df,employmentConfig):
         2. Prints a message if any influential points are removed.
             - Helpful Diagnostic
     '''
-    # Step 1
-    ## Retrieve OLS formula from config.yaml
-    #formula=employmentConfig['OLS_FORMULA']
-    #subqwifull = df[
-    #    (~df["emp3_qwi_flag"].isna()) &
-    #    (df["emp3_qwi_flag"].astype(float) != 5) &
-    #    (df["emp1_qwi_flag"].astype(float) != 5) &
-    #    ((df["agglvl_code"] != 71)|(df['agglvl_code']!=51))
-    #].copy()
-    #subqwifull["emp1_qwi"] = subqwifull["emp1_qwi"].astype(float)
-    #subqwifull["emp3_qwi"] = subqwifull["emp3_qwi"].astype(float)
-    #subqwifull["estnum"] = subqwifull["estnum"].astype(float)
 
-
-    ## Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
-    ## and perform initial model fitting
-    #y_pre, X_pre = Formula(formula).get_model_matrix(subqwifull)
-    #model_pre = sm.OLS(y_pre, X_pre).fit()
-    ## Calculate Cook's distance for each observation
-    #influence = OLSInfluence(model_pre)
-    #cooks_d=influence.cooks_distance[0]
-    #student_resid = influence.resid_studentized_internal
-    ## Identify and remove indices of influential points. (Cook's Distance > threshold)
-    ## Threshold is configurable in config.yaml -> employmentConfig -> 'COOKS_THRESH'
-    #influential_indices = [i for i, d in enumerate(cooks_d) if d > employmentConfig['COOKS_THRESH']]
-    #outliers = [i for i, r in enumerate(student_resid) if np.abs(r) > employmentConfig['OUTLIER_THRESH']]
-    #if influential_indices:
-    #    print("Filtered out the following indices due to influence (Cook's Distance):", influential_indices)
-    #if outliers:
-    #    print("# of outliers filtered (Studentized Residuals):", len(outliers), '|', np.round((len(outliers)/len(subqwifull)),3) * 100, '%')
-    #rows_to_drop = influential_indices + outliers
-    #subqwifull = subqwifull.drop(subqwifull.index[rows_to_drop])
-    ## Rebuild design matrices without influential points and perform final model fitting.
-    #y, X = Formula(formula).get_model_matrix(subqwifull)
     df=df.copy()
     if "DIAGNOSTIC_PLOTS" in employmentConfig:
         diagplots=employmentConfig['DIAGNOSTIC_PLOTS']
     else:
         diagplots=None
-    model = get_model(df,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
+    if "emp1diff" in employmentConfig['OLS_FORMULA']:
+        modeldf=df.loc[(df['emp1_missing6by4']>0),:]
+        #modeldf=modeldf.loc[(modeldf['emp1diff']>0)&(modeldf['emp3']>=0),:]
+    else:
+        modeldf=df
+    model = get_model(modeldf,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
     print(model.summary())
     # end. return fitted model.
     return model
@@ -159,6 +131,7 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     if rseed is not None:
         np.random.seed(rseed)
     m1emp = df["emp1"]
+
     # Identify rows to be imputed
     missm1indicator = df["emp1"].isna()
 
@@ -172,9 +145,7 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
 
 
     if set(predidx)!=set(missingidx):
-        print(f'lenpredix {len(predidx)}, lenmissingidx {len(missingidx)}')
-        print("predidx!=missingidx")
-        #print(list(set(missingidx)-set(predidx)))
+        print(f'Something wrong: some of the {len(missingidx)} missing emp1 values have not been filled by the {len(predidx)} prediction values. Printing head of unfilled missing values...')
         print(df.loc[list(set(missingidx)-set(predidx)),["state","naics2","estnum","emp3","emp3_source","emp1_sum6by4","emp1_missing6by4","emp1"]].head())
 
     # Generate predicted values with random noise based on standard errors
@@ -192,14 +163,14 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     if "emp1diff" in response:
         m1empfit=m1empfit+missingsub['emp1_sum6by4']
     # Ensure no negative employment and validate against stable values
+
     m1empfit[m1empfit < 0] = 0
     m1emp[missm1indicator]=m1empfit
     m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"])
     #m1emp[missm1indicator]=adjust_varvalues(m1emp[missm1indicator], dfmaxmin, stabvals=None, variable="emp1")
     # Round to whole numbers
-
     output = np.round(m1emp.astype(float), 0)
-    # Optionally include imputation indicatior 
+    # Optionally include imputation indicatior
     if include_indicator:
         return output, missm1indicator
     return output
@@ -310,7 +281,6 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_
         check_m2emp(df4,m2emp)
 
     df4.loc[df4["emp1_source"]=="model","emp1"]=m1emp
-    #print(f'inside employmentFunctions emp2_source counts:\n {df4["emp2_source"].value_counts(dropna=False)}')
     df4.loc[df4["emp2_source"].isna(), "emp2_source"] = "emp2_noise"
     df4.loc[df4["emp2"].isna(),"emp2"]=m2emp[df4["emp2"].isna()]
     return empMat, df4

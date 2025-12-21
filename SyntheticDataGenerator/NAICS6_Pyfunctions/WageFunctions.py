@@ -61,8 +61,19 @@ def get_wages_model(df, emp_mat_adj,wageConfig):
         diagplot=wageConfig["DIAGNOSTIC_PLOTS"]
     else:
         diagplot=None
-    model=get_model(wagedf4, wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,include_multicolinearity=True,
-              return_summary_and_diagnostics=False)
+    if "wagesdiff" in wageConfig['OLS_FORMULA']:
+        if wageConfig['OLS_FORMULA'].startswith("np.log") or wageConfig['OLS_FORMULA'].startswith("np.sqrt"):
+            model = get_model(wagedf4.loc[(wagedf4['wages_missing6by4'] > 0)&(wagedf4['wagesdiff']>0), :], wageConfig['OLS_FORMULA'],
+                              wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'],
+                              diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
+                              return_summary_and_diagnostics=False)
+        else:
+            model = get_model(wagedf4.loc[wagedf4['wages_missing6by4']>0,:], wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'],
+                          diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
+                          return_summary_and_diagnostics=False)
+    else:
+        model=get_model(wagedf4, wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,include_multicolinearity=True,
+                  return_summary_and_diagnostics=False)
     print(model.summary())
     return model
 
@@ -209,7 +220,7 @@ def wagesFromModel(df, modelwage, formula_str=None):
         wagefit = wagefit + df['wages_sum6by4']
     return wagefit
 
-def wagesFromQWI(df, empmat):
+def wagesFromQWI(df):
     '''
     What is the point?
         wagesFromQWI() calculates wages using QWI earnings data
@@ -220,13 +231,13 @@ def wagesFromQWI(df, empmat):
         Array of calculated wage values
     '''
     # Multiply employment by earnings
-    empmat = empmat.astype(float)
+    empmat = df[['emp1','emp2','emp3']].astype(float)
     earnbeg = df['avg_month_emp_wages'].astype(float)
     wages = np.sum(empmat, axis=1) * earnbeg.values/1000 #match the scale of wages_cbp
     return wages
 
 
-def adjust_wagevalues(fitwagedf, dfmaxmin):
+def adjust_wagevalues(fitwagedf, dfmaxmin,count6dig=None,minonly=True):
     '''
     What is the point?
         adjust_wagevalues() constrains wage estimates to stay within min/max bounds
@@ -237,17 +248,24 @@ def adjust_wagevalues(fitwagedf, dfmaxmin):
         DataFrame with adjusted wage values
     '''
     # Merge with min/max bounds
+
     maxmindf = dfmaxmin[['geo4naics', 'minwages', 'maxwages']].copy()
     fitwagedf = fitwagedf.merge(maxmindf, on='geo4naics', how='left')
-    # Apply constraints
-    fitwagedf['wages'] = fitwagedf['wages'].clip(
-        lower=fitwagedf['minwages'].astype(float),
-        upper=fitwagedf['maxwages'].astype(float)
-    )
-    fitwagedf = fitwagedf.drop(columns=['minwages', 'maxwages'])
+    print(fitwagedf[['geoindkey','wages','minwages','maxwages','avg_month_emp_wages','emp3','wages_source','usewageModel']].head())
+    if minonly:
+        fitwagedf['wages'] = fitwagedf['wages'].clip(
+            lower=fitwagedf['minwages'].astype(float)
+        ).round(0)
+    else:
+        fitwagedf['wages'] = fitwagedf['wages'].clip(
+            lower=fitwagedf['minwages'].astype(float),
+            upper=fitwagedf['maxwages'].astype(float)
+        ).round(0)
+
+    #fitwagedf = fitwagedf.drop(columns=['minwages', 'maxwages'])
     return fitwagedf
 
-def get_wages4(df4, empmat, wagemodel,formula_str=None,useEarnQWI=True, count6digdf=None, maxmindf=None):
+def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=None, maxmindf=None):
     '''
     What is the point?
         get_wages4() is the main function for wage estimation that:
@@ -256,7 +274,6 @@ def get_wages4(df4, empmat, wagemodel,formula_str=None,useEarnQWI=True, count6di
         3. Uses model predictions as last resort
     Inputs:
         1. df4 - 4-digit NAICS level data
-        2. empmat - Employment matrix
         3. wagemodel - Fitted wage prediction model
         4. useEarnQWI - Whether to use QWI earnings data
         5. count6digdf - 6-digit NAICS data (optional)
@@ -265,32 +282,29 @@ def get_wages4(df4, empmat, wagemodel,formula_str=None,useEarnQWI=True, count6di
         DataFrame with estimated wages and method indicators
     '''
     # First try using CBP data
-    print(df4['wages_source'].value_counts(dropna=False))
+    #print(df4['wages_source'].value_counts(dropna=False))
 
     wages_Available = df4['wages'].notna()
-    print(f'wgaes_Available shape {wages_Available.shape}')
+    #print(f'wgaes_Available shape {wages_Available.shape}')
     #df4['wages'] = df4['wages']
     useModel = ~wages_Available
-    print(f"useModel sum {sum(useModel)}")
+    #print(f"useModel sum {sum(useModel)}")
     # Optionally use QWI earnings data
     if useEarnQWI:
         print("Number which uses QWI:", end=" ")
         print(df4['avg_month_emp_wages'].isna().value_counts(dropna=False))
         print(sum(df4["avg_month_emp_wages"].isna()))
         EarnBegAvailable = df4['avg_month_emp_wages'].notna()
-        print(sum(EarnBegAvailable))
+        #print(f'sum EarnBegAvailiable {sum(EarnBegAvailable)}')
         useQWI = (EarnBegAvailable) & (~wages_Available)
-        print(f"Using avg_month_emp_wages from QWI for {sum(useQWI)} rows")
-        df4.loc[useQWI, 'wages'] = wagesFromQWI(df4[useQWI], empmat[useQWI])
+        print(f"Using avg_month_emp_wages from QWI for {sum(useQWI)} rows out of {sum(EarnBegAvailable)} QWI available rows.")
+        df4.loc[useQWI, 'wages'] = wagesFromQWI(df4[useQWI])
         useModel = ~EarnBegAvailable & ~wages_Available
-    # Convert empmat to DataFrame
-    #empmat_df = pd.DataFrame(empmat, columns=['emp1', 'emp2', 'emp3'])
-    # Use model for remaining cases
-    #df4 = pd.concat([df4, empmat_df], axis=1)
+
     if wagemodel is None and sum(useModel)>0:
         raise Exception("Without a model there are "+str(sum(useModel)+" missing wage values at the county by NAICS-4 level.\\ You must include a wageConfig in your config file with subfields OLS_FORMULA, COOKS_THRESH, and OUTLIER_THRESH."))
     else:
-        print("Number of cells which use Model:", sum(useModel))
+        print("Number of wage county by NAICS-4 cells which use Model:", sum(useModel))
         predicted_wages = wagesFromModel(df4[useModel], wagemodel,formula_str=formula_str)
 
         response = wagemodel.model.endog_names
@@ -312,6 +326,6 @@ def get_wages4(df4, empmat, wagemodel,formula_str=None,useEarnQWI=True, count6di
         df4.loc[useQWI, 'usewageModel'] = 2
         df4.loc[useQWI,"wages_source"]="qwi_and_emps"
     # Apply bounds, round, and return
-    df4 = adjust_wagevalues(df4,maxmindf)
+    df4 = adjust_wagevalues(df4,maxmindf,count6digdf)
     df4['wages'] = df4['wages'].round()
     return df4

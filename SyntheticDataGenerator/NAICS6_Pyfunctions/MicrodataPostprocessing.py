@@ -4,6 +4,11 @@ import numpy as np
 import re
 from pathlib import Path
 import yaml
+import sys
+
+sys.path.append(os.path.abspath('./'))
+from hierarchy_geoindkey import *
+from GeneralFunctions import *
 # with open('./config.yaml', 'r') as configFile:
 #     config = yaml.safe_load(configFile)
 #     postprocessingConfig = config['microdataConfig']
@@ -13,54 +18,7 @@ import yaml
 
 
 
-def get_xwalk_naics(crosswalk_file):
-    """
-    Reads and processes the NAICS crosswalk file.
-    
-    Steps:
-    1. Reads the CSV file.
-    2. Cleans the 'super_sector' column by removing all non-numeric characters.
-    3. Cleans the 'naics_sector' column by removing all characters except digits and the '-' 
-    4. For rows where 'naics_sector' contains a dash, expands the row into multiple rows 
-       for each individual sector in the range, specifically 31-33, 44-45, and 48-49
-    5. Removes any rows still containing a dash in 'naics_sector'.
-    """
-    xwalk = pd.read_csv(crosswalk_file)
-    
-    # Clean 'super_sector' by removing non-numeric characters
-    xwalk['super_sector'] = xwalk['super_sector'].astype(str).str.replace(r'[^0-9]', '', regex=True)
-    
-    # Clean 'naics_sector' while preserving dashes
-    xwalk['naics_sector'] = xwalk['naics_sector'].astype(str).str.replace(r'[^0-9-]', '', regex=True)
-    
-    # Identify rows with a dash in 'naics_sector'
-    dash_rows = xwalk[xwalk['naics_sector'].str.contains("-")]
-    
-    # Define expanded ranges:
-    expand_mapping = {
-        "31-33": ["31", "32", "33"],
-        "44-45": ["44", "45"],
-        "48-49": ["48", "49"]
-    }
-    
-    # Expand each row that contains a dash
-    expanded_rows = []
-    for idx, row in dash_rows.iterrows():
-        key = row['naics_sector']
-        if key in expand_mapping:
-            for val in expand_mapping[key]:
-                new_row = row.copy()
-                new_row['naics_sector'] = val
-                expanded_rows.append(new_row)
-    
-    if expanded_rows:
-        df_expanded = pd.DataFrame(expanded_rows)
-        xwalk = pd.concat([xwalk, df_expanded], ignore_index=True)
-    
-    # Remove rows still containing a dash in 'naics_sector'
-    xwalk = xwalk[~xwalk['naics_sector'].str.contains("-")]
-    
-    return xwalk
+
 
 def cut1(naicscode):
     # Cuts 1 character off end of string
@@ -97,9 +55,7 @@ def postprocess_est_microdata_split(filename, yr, qtr, xwalk=None):
     estdf['naics_sector'] = estdf['naics3'].apply(cut1)
     estdf['naics'] = estdf['naics6']
     
-    # Merge in the super_sector info from the crosswalk
-    estdf = estdf.merge(xwalk[['naics_sector', 'super_sector']], on='naics_sector', how='left')
-    
+
     # Add constant columns
     estdf['year'] = yr
     estdf['qtr'] = qtr

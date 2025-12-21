@@ -1,3 +1,5 @@
+import pandas as pd
+
 
 def not_subdivided(geoindkey,missdf,investigatedf=None,fulldf=None):
     missdf.reset_index(drop=True,inplace=True)
@@ -246,5 +248,7 @@ def random_midpoint(datarw):
         return(round(np.random.uniform(float(datarw['lb']),float(datarw['ub'])),0))
     else:
         return datarw['lb']
+
+
 
 

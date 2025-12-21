@@ -8,6 +8,69 @@ from statsmodels.graphics.gofplots import qqplot
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+import sys
+import os
+
+
+sys.path.append(os.path.abspath("./NAICS6_Pyfunctions/"))
+from plottingFunctions import *
+
+## Function is incomplete. It formats the fitted model as a latex style string to be used as suptitle of
+## matplotlib plots with usetex=True. Currently it does not handle transformation formatting or polynomial term formatting.
+def tex_format_model(formula_str,modelfit,digits=2,useparams=False):
+    response = modelfit.model.endog_names.strip()
+    terms = []
+    if useparams:
+        predictors= modelfit.model.exog_names
+        params=modelfit.params
+        print(f'predictors {predictors} params {params}')
+
+        for var,beta in zip(predictors,params):
+            beta_round=f"{beta:.{digits}f}"
+            if var.lower() in ["intercept","const"]:
+                terms.append(beta_round)
+            else:
+                format_var=re.sub(r'_',r'\\_',var)
+                terms.append(f"{beta_round}\\,{format_var}")
+    else:
+        temp_rhs=formula_str.split("~")[1]
+        if "-1" in temp_rhs:
+            const=""
+            temp_rhs=re.sub("-1","",temp_rhs)
+        else:
+            const=rf"$\beta_0$"
+        terms.append(const)
+        predictors=temp_rhs.split("+")
+        i=1
+        for var in predictors:
+            format_var=re.sub(r'_',r'\\_',var.strip())
+            terms.append(rf"$\beta_{i}$ {format_var}")
+        print(f'predictors {predictors}')
+
+    rhs=" + ".join(terms)
+    texout=rf"$\hat{{{response}}} =$ {rhs}"
+    print(texout)
+    return texout
+
+
+def features_from_formula_str(formula_str,data):
+
+    if "~" in formula_str:
+        lhs, rhs=formula_str.split("~",1)
+        response=feature_to_colname(lhs.strip(),data)
+    elif "=" in formula_str:
+        lhs, rhs = formula_str.split("=", 1)
+        response=feature_to_colname(lhs.strip(),data)
+    else:
+        rhs=formula_str
+        response=None
+    predictors=[]
+    splitplus=rhs.split("+")
+    for feature in splitplus:
+        cname=feature_to_colname(feature,data)
+        predictors.append(cname)
+    return list(set(predictors)), response
+
 
 def transform_feature(feature, df):
     if feature in df.columns:
@@ -292,45 +355,6 @@ def subset_model_data(data,formula_str):
     data=data[list(checkvars)].copy()
     return data[data.notna().all(axis=1)]
 
-def save_diagnostic_plots(model,title,filename):
-    fitted=model.fittedvalues
-    resid=model.resid
-
-    fig, axes=plt.subplots(1,2,figsize=(12,6))
-    ## QQ plot for normality
-    qqplot(resid,line='s',ax=axes[0])
-    axes[0].set_title("Residual Q-Q Plot")
-
-    ## Resid vs fitted
-    sns.residplot(x=fitted,y=resid,lowess=True,line_kws={'color':'red','lw':1},scatter_kws={'alpha':0.4},ax=axes[1])
-    axes[1].axhline(0,color='grey',linewidth=1)
-    axes[1].set_xlabel("Fitted")
-    axes[1].set_ylabel("Residuals")
-    axes[1].set_title("Fitted vs. Residuals")
-
-    plt.suptitle(title,fontsize=12,y=1.05)
-    plt.tight_layout()
-    plt.savefig(filename,dpi=300,bbox_inches='tight')
-    plt.close('all')
-    print("Save regression diagnostic plots as "+filename)
-
-def features_from_formula_str(formula_str,data):
-
-    if "~" in formula_str:
-        lhs, rhs=formula_str.split("~",1)
-        response=feature_to_colname(lhs.strip(),data)
-    elif "=" in formula_str:
-        lhs, rhs = formula_str.split("=", 1)
-        response=feature_to_colname(lhs.strip(),data)
-    else:
-        rhs=formula_str
-        response=None
-    predictors=[]
-    splitplus=rhs.split("+")
-    for feature in splitplus:
-        cname=feature_to_colname(feature,data)
-        predictors.append(cname)
-    return list(set(predictors)), response
 
 def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicolinearity=False,diagnostic_plots=None,output_removed=False,return_summary_and_diagnostics=False):
     '''
@@ -365,13 +389,10 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicol
     formula=formula_str
     Config={'COOKS_THRESH':cooks_thresh,'OUTLIER_THRESH':studentresid_thresh,'DIAGNOSTIC_PLOTS':diagnostic_plots}
     subdf = subset_model_data(data,formula_str)
-    #if Config['MODEL_DATA_FILE'] is not None:
-    #    combinedf.to_csv(Config['MODEL_DATA_FILE'])
-
-
 
     # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
     # and perform initial model fitting
+
     y_pre, X_pre = Formula(formula).get_model_matrix(subdf)
     model_pre = sm.OLS(y_pre, X_pre).fit()
 
@@ -460,115 +481,6 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
     else:
         return total
 
-def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None, formula=None, adjust_source=True,source="CBP",rseed=None):
-        '''
-        What is the point?
-            get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
-            predictors. This model is used when direct employment data is missing.
-        Steps:
-            1. Filters input data to include only rows where
-                - 'sEmpEnd' is not suppressed
-                - 'sEmp' is not supressed
-                - 'ind_level' is not "A"
-            2. Initial model fitting
-                - Use formula specified in config.yaml (default: 'Emp ~ EmpEnd + estnum + C(sector) + C(state)')
-                  to construct the design matrix to fit an OLS model. (model_pre).
-            3. Influential point/Outlier detection
-                - Compute Cook's distance for each observation and filter out observations where Cook's
-                  Distance exceeds the threshold set in config.yaml. (default: 1)
-                  Compute Studentized Residuals for each observation and filter out observations where they
-                  exceed the threshold set in config.yaml
-            4. Refit model after removing influential points
-        Configurable Parameters:
-            The regression formula and Cook's disitance thresholds are both configurable via config.yaml
-            under employmentConfig
-        Returns:
-            1. model  -  (statsmodel.OLS)
-                - Used with custom_predict in get_m1emp() to predict month 1 employment counts
-            2. Prints a message if any influential points are removed.
-                - Helpful Diagnostic
-        '''
-        if "year_qtr" not in data.columns:
-            data['year_qtr'] = data['year'] + data['qtr'].astype(float).multiply(0.25)
-        # Step 1
-        # get difference of quarters
-        tempdata = data.copy()
-
-
-
-        if adjust_source: #adjusting from one data source to another
-            if formula is None:
-                formula = response+"~."
-            usenewsource=data.loc[:,response].isna()
-            subdata=tempdata.loc[~usenewsource,:].copy()
-        else: #adjusting CBP for quarter
-            tempdata['year_qtr_diff'] = tempdata['year_qtr_cbp'].astype(float) - tempdata['year_qtr'].astype(float)
-
-            if tempdata['year_qtr'].nunique() > 1:
-                formula_stem = response + "~year_qtr_diff+qtr*naics2+"
-            else:
-                formula_stem = response + "~"
-
-            # Retrieve OLS formula from config.yaml if quarterConfig exists
-            if quarterConfig is not None and formula is None:
-                if response == "wages_qcew":
-                    formula = quarterConfig['WAGE_OLS_FORMULA']
-                else:
-                    formula = quarterConfig['EMP_OLS_FORMULA']
-            elif formula is None: #use defaults
-                formula = formula_stem + "wages_cbp*wages_cbp_flag+np.log(estnum_cbp)+np.log(estnum)+emp3_cbp+emp3_cbp_flag+agglvl_code+agglvl_code*naics2"
-
-                #ensure variable type is correct
-                for vname in ["year", "wages_cbp", "estnum_cbp", "estnum", "wages_qcew", "emp1_qcew", "emp2_qcew", "emp3_qcew",
-                          "emp3_cbp"]:
-                    tempdata[vname] = tempdata[vname].astype(float)
-                for vname in ['qtr', 'qtr_cbp', 'wages_cbp_flag', "emp3_cbp_flag", "agglvl_code", "naics2", "naics3", "naics4",
-                              "naics5"]:
-                    tempdata[vname] = tempdata[vname].astype("category")
-            #dataset to fit model on
-            subdata = tempdata[
-                (~tempdata['wages_cbp'].isna()) & (~tempdata['wages_qcew'].isna()) & (~tempdata['emp3_cbp'].isna())].copy()
-
-        # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
-        # and perform initial model fitting
-        y_pre, X_pre = Formula(formula).get_model_matrix(subdata)
-        model = sm.OLS(y_pre, X_pre).fit()
-
-        if adjust_source: #adjusting datasources
-            print("Model to adjust "+source+"  "+ response)
-            print(model.summary())
-
-            #dataset with missing response values
-            #no_response=data.loc[data.loc[:,response].isna(),:].copy()
-            pred, se_fit=custom_predict(tempdata[usenewsource], model, rseed=rseed)
-            #responsefit = np.random.normal(
-            #    loc=pred,  # Center at predicted values
-            #    scale=se_fit,  # Scale by prediction uncertainty
-            #    size=len(no_response)
-            #)
-
-
-            data.loc[usenewsource, response] = np.round(pred,decimals=0)
-            if response+"_source" not in data.columns:
-                data.loc[:,response+"_source"]=""
-            data.loc[usenewsource,response+"_source"]=source.lower()
-            data.loc[data[response].isna(),response+"_source"]=""
-
-
-
-
-        else:
-            if quarterConfig is not None and quarterConfig['DIAGNOSTIC_PLOTS'] is not None:
-                save_diagnostic_plots(model, formula, quarterConfig['DIAGNOSTIC_PLOTS'])
-            print("Model to adjust CBP " + response + " to quarter " + str(generalConfig['QTR']))
-            print(model.summary())
-
-            split_response=response.split("_")
-            split_response.pop()
-            response_stem="_".join(split_response)
-            data.loc[subdata.index.tolist(), response_stem+"_cbp"] = model.fittedvalues()
-
-        return data
 
 
 def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False,ignore_intercept=True):
@@ -609,53 +521,54 @@ def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False
 
     if return_text:
         if high_vif.empty:
-            outtext=f"\nVariables with VIF > {vif_threshold} (potential multicollinearity): None detected"
+            outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity): None detected"
         else:
-            outtext=f"\nVariables with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
+            categories_indic=high_vif["Variable"].str.contains("[T.")
+            if categories_indic.sum()==0:
+                outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
+            else:
+                outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
+
+                #new_high_vif=high_vif.loc[~categories_indic,:]
+                #categories=high_vif.loc[categories_indic,"Variable"].str.split("[",expand=True)[0]
+
+
 
         return vif_data,outtext
     else:
-        print(f"\nVariables with VIF > {vif_threshold} (potential multicollinearity):")
+        print(f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):")
         if high_vif.empty:
             print("None detected.")
         else:
             print(high_vif)
         return vif_data
 
-def plot_hist_with_normal(series, filename="histogram.png", bins=30):
-        """
-        Plot a histogram of a pandas Series with a normal density curve overlay.
 
-        Parameters:
-            series (pd.Series): Input data.
-            filename (str): Output filename for the saved PNG.
-            bins (int): Number of bins for the histogram.
-        """
-        # Drop missing values
-        series = series.dropna()
+def write_pipe_table(df, filename,include_index=True):
+    """
+    Writes a pandas DataFrame to a file in pipe-formatted table
+    df : The data to write.
+    filename : Path to the output file.
+    """
+    if include_index:
+        df.reset_index(drop=False,inplace=True)
+    # Create pipe-style header
+    header = "| " + " | ".join([str(col) for col in df.columns]) + " |"
+    separator = "| " + " | ".join(["---"] * len(df.columns)) + " |"
+    #get max character count
 
-        # Compute mean and standard deviation
-        mean = series.mean()
-        std = series.std()
+    # Create pipe-style rows
+    rows = []
+    for _, row in df.iterrows():
+        rows.append("| " + " \t| ".join([rv if isinstance(rv,str) else f"{rv:.0f}" for rv in row.values]) + " \t|")
 
-        # Create histogram
-        plt.figure(figsize=(8, 5))
-        count, bins_edges, _ = plt.hist(series, bins=bins, density=True, alpha=0.6, color='skyblue', edgecolor='black')
+    table_text = "\n".join([header, separator] + rows) + "\n"
 
-        # Create normal density curve
-        x = np.linspace(series.min(), series.max(), 200)
-        y = norm.pdf(x, mean, std)
-        plt.plot(x, y, 'r-', linewidth=2, label='Normal PDF')
+    # Determine write mode based on file existence
+    file_exists = os.path.exists(filename)
+    write_mode = "a" if file_exists else "w"
 
-        # Add labels and title
-        plt.xlabel("Value")
-        plt.ylabel("Density")
-        plt.title(f"Histogram with Normal Curve (mean={mean:.2f}, std={std:.2f})")
-        plt.legend()
-
-        # Save the plot
-        plt.tight_layout()
-        plt.savefig(filename, dpi=300)
-        plt.close('all')
-        print(f"Saved histogram with normal curve as '{filename}'")
-
+    with open(filename, write_mode, encoding="utf-8") as f:
+        if file_exists:
+            f.write("\n")  # add blank row before appending
+        f.write(table_text)

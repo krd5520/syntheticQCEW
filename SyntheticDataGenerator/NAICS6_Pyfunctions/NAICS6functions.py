@@ -130,6 +130,7 @@ def get_wage6_per4(subdf6,subdf4,rseed=None):
             print("WARNING: remainders are negative!")
             codes = ','.join(subdf6['geoindkey'].astype(str).tolist())
             print(f"Remainders: wage {float(remain_wage)} Codes: {codes}")
+            print(f"subdf4 wages len {subdf4['wages'].shape[0]} sum {subdf4['wages'].sum()} (max, min) {subdf4['maxwages'].values}, {subdf4['minwages'].values}, wages source {subdf4['wages_source'].values}, subdf6 wages sum {subdf6['wages'].astype(float).sum()} \n subdf6 {subdf6[['geoindkey','wages','wages_source']]}")
     #subdf6['wages'] = subdf6['q'] # Start with known values
     unknown_indic = (subdf6['wages'].isna())
     # Distribute remaining wage to suppressed entries
@@ -173,7 +174,7 @@ def process_chunk(x, df6_toget, df4n):
     '''Wrapper function for parallel processing'''
     return get_6naics_per4(x, df6=df6_toget, df4imp=df4n)
 
-def get_6naics_all(df, df4n, codes4summary, rseed=None):
+def get_6naics_all(df, df4n, codes4summary, rseed=None,keepqcew=True):
     '''
     Main function that coordinates full 6-digit NAICS imputation:
     1. Separates simple cases (1:1 mappings)
@@ -185,12 +186,30 @@ def get_6naics_all(df, df4n, codes4summary, rseed=None):
     timestart1 = time.time()
     # Handle simple cases (1 6-digit code per 4-digit)
     codesNOTtoget = codes4summary['geo4naics'][codes4summary['count6by4codes'] == 1]
-    df4forjoin = df4n[['geo4naics', 'emp1','emp2', 'emp3', 'wages']].copy()
+    df4forjoin = df4n[['geo4naics', 'emp1','emp2', 'emp3', 'wages','estnum']].copy()
+
     df6_onecodeper4 = (
         df[df['geo4naics'].isin(codesNOTtoget)]
         .merge(df4forjoin, on='geo4naics', how='inner',suffixes=["_naics6",""])
     )
+    ## Check agreement
+    check_diff_emp3=df6_onecodeper4['emp3']-df6_onecodeper4['emp3_naics6']
+    check_diff_wages=df6_onecodeper4['wages']-df6_onecodeper4['wages_naics6']
+    check_diff_wages[df6_onecodeper4['wages_naics6'].isna()]=0
+    check_diff=check_diff_emp3+check_diff_wages
+    if check_diff.round(0).sum()!=0:
+        print(f"checking agreement on countyXnaics4 and countyXnaics6 when there is only 1 naics6 code in the naics4\n{df6_onecodeper4.loc[check_diff.round(0)!=0,['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum','estnum_naics6', 'emp1','emp1_naics6','emp2','emp2_naics6', 'emp3','emp3_naics6', 'wages','wages_naics6']].head()}")
     df6_onecodeper4=df6_onecodeper4[['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum', 'emp1','emp2', 'emp3', 'wages']]
+
+    ##Check all countyXnaics4 codes have countyXnaics6 subcodes
+    geo4naics_codes=df4n['geoindkey'].str.slice(stop=-2)
+    df6_geo4naics_codes=df.loc[df['agglvl_code']==78,'geo4naics']
+    n_geo4naics=geo4naics_codes.nunique()
+    n_df6_geo4naics=df6_geo4naics_codes.nunique()
+    if n_geo4naics!=n_df6_geo4naics:
+        print(f"Number of unique geo4naics codes do not align. In countyXnaics4 {n_geo4naics} in countyXnaics6 {n_df6_geo4naics}.")
+        print(df6_geo4naics_codes[~df6_geo4naics_codes.isin(geo4naics_codes)].head())
+    raise Exception("stop here")
     # Prepare complex cases for parallel processing
     df6_toget = df[~df['geo4naics'].isin(codesNOTtoget)]
     #get_m3emp6_all(

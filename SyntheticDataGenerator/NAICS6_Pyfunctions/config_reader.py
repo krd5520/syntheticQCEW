@@ -84,11 +84,14 @@ def check_config(config_file):
     wageConfig=None
     employmentConfig=None
     preprocessConfig=None
+    supplementConfig=None
     
     assert "microdataConfig" in config and isinstance(config['microdataConfig'],dict), f"Config file is missing microdataConfig."
     assert "generalConfig" in config and isinstance(config['generalConfig'],dict), f"Config file is missing generalConfig."
     generalConfig = config['generalConfig']
     microdataConfig = config['microdataConfig']
+    if 'otherdataConfig' in config:
+        supplementConfig=config['otherdataConfig']
     for val in ["YEAR","QTR","SEED"]:
         assert val in generalConfig and isinstance(generalConfig[val],int), f"generalConfig missing integer-valued "+str(val)+"."
     if "SKIP_TO_MICRODATA" in generalConfig and generalConfig["SKIP_TO_MICRODATA"]:
@@ -132,7 +135,7 @@ def check_config(config_file):
             wageConfig = config['wageConfig']
 
        
-    return (generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig)
+    return (generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementConfig)
 
         #check NAICS6 by county file exists
 

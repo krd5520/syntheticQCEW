@@ -70,28 +70,42 @@ def find_one_sublevel(naicsdf,level=2):
 
 
 ## gets state, cnty, geography, industry, and ind_level from geoindkey
-def fill_from_geoindkey(data,numeric_ind_level=True):
+def fill_from_geoindkey(data,numeric_ind_level=True,naics_xwalk=None):
+    #split geoindkey into geography and industry portions
     expandgeoind=data['geoindkey'].str.split('_',expand=True)
     if len(expandgeoind.columns)>2:
-        print(data.loc[expandgeoind.iloc[:,3] is not None,'geoindkey'].head())
+        raise Exception(f'geoindkey format error. There should only be 1 underscore: {data.loc[expandgeoind.iloc[:,3] is not None,"geoindkey"].head()}')
     data['geography']=expandgeoind.iloc[:,0]
     data.loc[:,'industry'] = expandgeoind.iloc[:, 1]
+
+    #get county and state from geographu
     data['state']=data['geography'].astype(str).str.slice(start=0,stop=-3)
     data['cnty']=data['geography'].astype(str).str.slice(start=-3)
+
+    #get ind_level
     ninddig=data['industry'].str.count(r'\d')
     if numeric_ind_level:
         data['ind_level'] = ninddig.astype(int)
         ninddig[ninddig==0]=-1
         data['agglvl_code']=72+ninddig
-        for i in [2, 3, 4, 5]:
+        for i in [2, 3, 4, 5]: #naics2, 3, 4, and 5 digits
             data["naics"+str(i)] = ""
             data.loc[data['ind_level']>=i,"naics"+str(i)]=data.loc[data['ind_level']>=i,"industry"].str.slice(start=0,stop=i)
-            #data.rename(columns={"tempnaicslevel":'naics'+str(i)},inplace=True)
     else:
         ninddig=ninddig.astype(str)
         ninddig[ninddig=='0']="A"
         ninddig[ninddig == '2'] = "S"
         data['ind_level']=ninddig
+
+    if naics_xwalk is not None:
+        containsdash = data['naics2'].astype(str).str.contains("-").sum()
+        if isinstance(naics_xwalk,str):
+            if containsdash>0:
+                naics_xwalk=get_xwalk_naics(naics_xwalk,expand_naics2=False)
+            else:
+                naics_xwalk=get_xwalk_naics(naics_xwalk,expand_naics2=True)
+            naics_xwalk.rename(columns={"naics_sector":"naics2","super_sector":"supersector"},inplace=True, errors="ignore")
+        data=data.merge(naics_xwalk[['naics2','supersector','domain']],on='naics2',how='left')
     if numeric_ind_level:
         data["naics2"] = data["naics2"].astype(str)
         data.loc[data["naics2"] == "31","naics2"] = "31-33"
@@ -101,14 +115,12 @@ def fill_from_geoindkey(data,numeric_ind_level=True):
         data.loc[data["naics2"] == "45", "naics2"] = "44-45"
         data.loc[data["naics2"] == "49", "naics2"] = "48-49"
         data.loc[data["naics2"] == "33", "naics2"] = "31-33"
-
-
     return data
 
 def count_notna(x):
     return x.notna().sum()
 
-def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=True):
+def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=True,perestab_stats=False):
     '''
     What is the point?
         get_codes_summary() aggregates wage data (qp1) from detailed NAICS codes up to higher
@@ -138,9 +150,16 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
     # Step 1: Define regex pattern to filter appropriate geoindkey values
     # Handles different NAICS code lengths (e.g., '01001_1111//' for 4-digit)
     pattern_grep = rf"_[0-9]{{{levelgrouped}}}[^0-9]{{{6 - levelgrouped}}}"
+
+    if variable+'_source' not in dfin.columns:
+        include_source=False
+        onlyQCEW=False
+
     if levelgrouped == 6:
         pattern_grep = r"_[0-9]{6}"
         dfin=dfin.loc[dfin["agglvl_code"]==78,:]
+    else:
+        dfin=dfin.loc[dfin['agglvl_code']==72+levelgrouped,:]
     if onlyQCEW:
         dfin[variable+"_qcew"]=dfin[variable]
         dfin.loc[dfin[variable+"_source"]!="qcew",variable+"_qcew"]=np.nan
@@ -152,20 +171,34 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
     label_group = f"{levelgrouped}by{groupbydigits}"
     # Step 3: Filter and prepare dataframe
     df = dfin[dfin['geoindkey'].str.contains(pattern_grep, regex=True)].copy()
-    if set(df.index.values)!=set(dfin.loc[dfin['agglvl_code']==78,:].index.values):
-        print(f"missing index {set(df.index.values)-set(dfin.loc[dfin['agglvl_code']==78,:].index.values)}")
+    #if set(df.index.values)!=set(dfin.loc[dfin['agglvl_code']==78,:].index.values):
+    #    print(f"missing index {set(df.index.values)-set(dfin.loc[dfin['agglvl_code']==78,:].index.values)}")
 
     df['geodignaics'] = df['geoindkey'].str[:str_end_idx]
     if include_source:
         df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable, variable+'_source']]
+    elif variable=="estnum" or "estnum" not in df.columns:
+        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', variable]]
     else:
         df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable]]
+    df[variable]=df[variable].astype(float)
     # Step 4: Aggregate data by grouping key
-    count6dig = df.groupby('geodignaics').agg(
-        CountCodes=('geoindkey', 'count'),
-        newcolname=(variable, lambda x: np.nansum(x.astype(float))),
-        newcolname_missing=(variable, lambda x: x.isna().sum())
-    )
+    if perestab_stats and variable!="estnum":
+        df['newcolname_perest']=df[variable]/df['estnum']
+        count6dig = df.groupby('geodignaics').agg(
+            CountCodes=('geoindkey', 'count'),
+            newcolname=(variable, lambda x: np.nansum(x)),
+            newcolname_missing=(variable, lambda x: x.isna().sum()),
+            newcolname_avgperest=('newcolname_perest',"mean"),
+            newcolname_medperest=('newcolname_perest', "median")
+        )
+    else:
+        # Step 4: Aggregate data by grouping key
+        count6dig = df.groupby('geodignaics').agg(
+            CountCodes=('geoindkey', 'count'),
+            newcolname=(variable, lambda x: np.nansum(x)),
+            newcolname_missing=(variable, lambda x: x.isna().sum())
+        )
     count6dig['grouplevels'] = f"group{label_group}"
     #print(count6dig[count6dig["CountCodes"]!=count6dig['newcolname_missing']].head())
     if include_source:
@@ -189,188 +222,74 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
     count6dig["propmissing"].fillna(1)
     if onlyQCEW:
         variable=variable.replace("_qcew","")
-    count6dig = count6dig.rename(columns={
-        'geodignaics': f'geo{groupbydigits}naics',
-        'CountCodes': f'count{label_group}codes',
-        'newcolname': f'{variable}_sum{label_group}',
-        'newcolname_missing': f'{variable}_missing{label_group}',
-        'propmissing':f'{variable}_propmissing{label_group}'
-    })
+    if perestab_stats and variable!="estnum":
+        count6dig = count6dig.rename(columns={
+            'geodignaics': f'geo{groupbydigits}naics',
+            'CountCodes': f'count{label_group}codes',
+            'newcolname': f'{variable}_sum{label_group}',
+            'newcolname_missing': f'{variable}_missing{label_group}',
+            'propmissing': f'{variable}_propmissing{label_group}',
+            'newcolname_avgperest':f'{variable}_avgperest{label_group}',
+            'newcolname_medperest':f'{variable}_medperest{label_group}'
+        })
+    else:
+        count6dig = count6dig.rename(columns={
+            'geodignaics': f'geo{groupbydigits}naics',
+            'CountCodes': f'count{label_group}codes',
+            'newcolname': f'{variable}_sum{label_group}',
+            'newcolname_missing': f'{variable}_missing{label_group}',
+            'propmissing':f'{variable}_propmissing{label_group}'
+        })
 
     #count6dig.rename(columns={"newcolname":newcolname,"newcolname_missing":newcolname+"_missing"},inplace=True)
     return count6dig
 
+def get_xwalk_naics(crosswalk_file,expand_naics2=True):
+    """
+    Reads and processes the NAICS crosswalk file.
 
-def get_varmin(codes4naics, fulldf, variable="emp1"):
-    '''
-    What is the point?
-        get_wagemin() calculates lower bounds for wages using 6-digit NAICS summaries
-    Inputs:
-        1. codes4naics - Array of 4-digit NAICS codes
-        2. fulldf - Complete dataset with wage information
-    Returns:
-        DataFrame with geoindkey and calculated minwage values
-    '''
-    # Get 6-digit NAICS summaries
-    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable)
-    # Create minwage column (0 if no data available)
-    tomerge6dig['min' + variable] = np.where(tomerge6dig[variable + '_sum6by4'].isna(), 0,
-                                                  tomerge6dig[variable + '_sum6by4'])
-    tomerge6dig['geoindkey'] = tomerge6dig['geo4naics'].astype(str) + "//"
-    tomerge6dig = tomerge6dig[['geoindkey', 'min' + variable]]
-    return tomerge6dig
+    Steps:
+    1. Reads the CSV file.
+    2. Cleans the 'super_sector' column by removing all non-numeric characters.
+    3. Cleans the 'naics_sector' column by removing all characters except digits and the '-'
+    4. For rows where 'naics_sector' contains a dash, expands the row into multiple rows
+       for each individual sector in the range, specifically 31-33, 44-45, and 48-49
+    5. Removes any rows still containing a dash in 'naics_sector'.
+    """
+    xwalk = pd.read_csv(crosswalk_file)
 
+    # Clean 'super_sector' by removing non-numeric characters
+    xwalk['super_sector'] = xwalk['super_sector'].astype(str).str.replace(r'[^0-9]', '', regex=True)
 
-def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="emp1",fulldf=None):
-    '''
-    What is the point?
-        adjust_geo4naics_varvalues() constrains wage/emp estimates to stay within min/max bounds
-    Inputs:
-        1. fitdf - DataFrame with estimates
-        2. dfmaxmin - DataFrame with min/max bounds (if none, then fulldf must be the full data without the estimates)
-        3. stabvals- if using stable employment as lower bound on employment, this is a series of those values
-        4. variable- string name of variable to be adjusted
-        5. adjust_indic- series of indicators to determine which of fitdf[variable] can be adjusted.
-        6. fulldf- if dfmaxmin is not provided, them fulldf must be the full data without the estimates
-    Returns:
-        DataFrame with adjusted wage values
-    '''
-    # Merge with min/max bounds
-    if dfmaxmin is None:
-        fulldf['geo4naics'] = fulldf['geoindkey'].str.slice(stop=-2)
-        df4 = fulldf[fulldf['agglvl_code'] == 76].copy()
-        dfmaxmin = get_varmaxmindf(df4dig=df4, fulldf=fulldf, variable=variable)
-    if 'geo4naics' not in fitdf.columns:
-        fitdf['geo4naics'] = fitdf['geoindkey'].str.slice(stop=-2)
-    maxmindf = dfmaxmin[['geo4naics', 'min' + variable, 'max' + variable]].copy()
-    fitdf = fitdf.merge(maxmindf, on='geo4naics', how='left')
-    fitdf['min'+variable+'_source'] = 'hierarchy'
-    fitdf.loc[fitdf['min'+variable]==0,'min'+variable+'_source'] = 'structural'
-    #if stabvals is not None and "emp" in variable:
-    #    fitdf.loc[:, "min" + variable] = np.fmin(fitdf["min" + variable].to_numpy(), stabvals.to_numpy())
-    #    fitdf.loc[fitdf['min'+variable]==stabvals,'min_source']="stable_emp"
+    # Clean 'naics_sector' while preserving dashes
+    xwalk['naics_sector'] = xwalk['naics_sector'].astype(str).str.replace(r'[^0-9-]', '', regex=True)
 
-    ## check given qcew values
-    fitdf['value_status']="within calculated bounds"
-    fitdf.loc[(fitdf[variable]<fitdf['min'+variable]),'value_status']="below calculated min"
-    fitdf.loc[(fitdf[variable]>fitdf['max'+variable]),'value_status']="above calculated max"
-    print(f'When adjusting {variable}: \n{pd.crosstab(fitdf["value_status"],fitdf[variable+"_source"],dropna=False)}')
-    fitdf.drop(columns="value_status",inplace=True)
-    printheads=False #for testing in development
-    if printheads:
-        print(f'Check Maxes\n{fitdf.loc[fitdf["max"+variable].notna(),[variable,variable+"_source","min"+variable,"max"+variable]].head()}')
+    if expand_naics2:
+        # Identify rows with a dash in 'naics_sector'
+        dash_rows = xwalk[xwalk['naics_sector'].str.contains("-")]
 
-    # Apply constraints
-    fitdf[variable] = fitdf[variable].clip(
-        lower=fitdf['min' + variable].astype(float),
-        upper=fitdf['max' + variable].astype(float)
-    )
-    #fixed=fitdf.loc[below_min_notqcew.index.values,[variable,variable+"_source",'min'+variable,'max'+variable,'min_source']]
-    #print(f'Fixed bounds?\n{fixed.head()}')
-    #fitdf = fitdf.drop(columns=['min' + variable, 'max' + variable,'min_source'])
-    return fitdf
+        # Define expanded ranges:
+        expand_mapping = {
+            "31-33": ["31", "32", "33"],
+            "44-45": ["44", "45"],
+            "48-49": ["48", "49"]
+        }
 
-def get_varmax(codes4naics, fulldf, variable="emp1"):
-    '''
-    What is the point?
-        get_wagemax() calculates upper bounds for wages by:
-        1. First trying 3-digit NAICS level data
-        2. Falling back to 2-digit sector level if needed
-        3. Using county-wide totals as last resort
-    Inputs:
-        1. codes4naics - Array of 4-digit NAICS codes
-        2. fulldf - Complete dataset with wage information
-    Returns:
-        DataFrame with geoindkey and calculated maxwage values
-    '''
-    # Initialize the output dataframe
-    outdf = pd.DataFrame({
-        "geoindkey": codes4naics,
-        "maxwages": np.nan,
-        "geo3naics": codes4naics.str[:-3],
-        "geo2naics": codes4naics.str[:-4],
-        "geography": codes4naics.str[:-7]
-    })
-    fulldf[variable] = fulldf[variable].astype(float)
-    # Try 3-digit NAICS level first
-    tomergedf3 = fulldf[
-        fulldf["geoindkey"].str.contains(r"_[0-9]{3}[^0-9]{3}", regex=True)
-    ].copy()
-    tomergedf3["geo3naics"] = tomergedf3["geoindkey"].str.slice(stop=-3)
+        # Expand each row that contains a dash
+        expanded_rows = []
+        for idx, row in dash_rows.iterrows():
+            key = row['naics_sector']
+            if key in expand_mapping:
+                for val in expand_mapping[key]:
+                    new_row = row.copy()
+                    new_row['naics_sector'] = val
+                    expanded_rows.append(new_row)
 
-    tomergedf3[variable + "_naics3"] = tomergedf3[variable]#np.where(tomergedf3[variable].notna(), np.nan, tomergedf3[variable])
-    tomergedf3 = tomergedf3[["geo3naics", "estnum", variable + "_naics3"]]
-    # Merge 3-digit data
-    outdf = outdf.merge(tomergedf3, on='geo3naics', how='left', suffixes=('', '_naics3'))
-    # For missing values, try 2-digit sector level
-    notmaxcodes = outdf[outdf[variable + '_naics3'].isna()]['geo2naics'].tolist()
-    fulldf['geo2naics'] = fulldf['geoindkey'].str.slice(stop=-4)
-    tomergedf2 = fulldf[fulldf['geo2naics'].isin(notmaxcodes) &
-                        fulldf['geoindkey'].str.contains(r"_[0-9]{2}[^0-9]{4}")].copy()
-    tomergedf2[variable + '_naics2'] = tomergedf2[variable]#np.where(tomergedf2[variable].notna(), np.nan, tomergedf2[variable])
-    tomergedf2 = tomergedf2[['geo2naics', 'estnum', variable + '_naics2']]
-    # Calculate differences between sector and summed 3-digit wages
-    tomergedf3[variable + '_naics3'] = tomergedf3[variable + '_naics3'].astype(float)
-    tomergedf3['geo2naics'] = tomergedf3['geo3naics'].str[:-1]  # Extract sector codes
-    tomergedf3 = tomergedf3.groupby('geo2naics', as_index=False).agg(sumvar3=(variable + '_naics3', 'sum'))
-    tomergedf2 = tomergedf2.merge(tomergedf3, on='geo2naics', how='left')
-    tomergedf2['missing_' + variable + '_naics2'] = tomergedf2[variable + '_naics2'].astype(float) - tomergedf2[
-        'sumvar3']
-    tomergedf2 = tomergedf2[['geo2naics', 'missing_' + variable + '_naics2', 'estnum', variable + '_naics2']]
-    # Merge sector-level data
-    outdf = outdf.merge(tomergedf2, on='geo2naics', how='left', suffixes=('', '_naics2'))
+        if expanded_rows:
+            df_expanded = pd.DataFrame(expanded_rows)
+            xwalk = pd.concat([xwalk, df_expanded], ignore_index=True)
 
-    outdf['max' + variable] = outdf.apply(
-        lambda row: row[variable + '_naics3'] if pd.notna(row[variable + '_naics3']) else row[
-            'missing_' + variable + '_naics2'], axis=1)
-    outdf = outdf.drop(columns=[variable + '_naics2'])
-    fulldf[variable] = fulldf[variable].astype(float)
-    # For remaining missing values, use county-wide totals
-    max_allind_allcounty = fulldf[fulldf['agglvl_code'] == 76][variable].max(skipna=True)
-    notmaxcodes = outdf[outdf['max' + variable].isna()]['geography'].tolist()
-    tomergedfall = fulldf.copy()
-    tomergedfall['geography'] = tomergedfall['geoindkey'].str[:-7]
-    tomergedfall = tomergedfall[tomergedfall['geography'].isin(notmaxcodes)]
-    tomergedfall = tomergedfall[tomergedfall['geoindkey'].str.contains('_------')]
-    tomergedfall[variable + 'all'] = tomergedfall.apply(
-        lambda row: max_allind_allcounty if row[variable] != "" else row[variable], axis=1)
-    tomergedfall = tomergedfall[['geography', 'estnum', variable + 'all']]
-    # Calculate county-level differences
-    tomergedf2['geography'] = tomergedf2['geo2naics'].str[:-3]
-    tomergedf2 = tomergedf2.groupby('geography', as_index=False)[variable + '_naics2'].sum(min_count=1)
-    tomergedf2.rename(columns={variable + '_naics2': 'sum' + variable + '2'}, inplace=True)
-    tomergedfall = tomergedfall.merge(tomergedf2, on="geography", how="left")
-    tomergedfall['missing' + variable + 'all'] = tomergedfall[variable + 'all'].astype(float) - tomergedfall[
-        'sum' + variable + '2'].astype(float)
-    tomergedfall = tomergedfall[['geography', 'missing' + variable + 'all', 'estnum', variable + 'all']]
-    # Final merge and return
-    outdf = outdf.merge(tomergedfall, on="geography", how="left", suffixes=("", "_allindustry"))
-    outdf['max' + variable] = outdf.apply(
-        lambda row: row['missing' + variable + 'all'] if pd.isna(row['max' + variable]) else row['max' + variable],
-        axis=1)
-    outdf = outdf[['geoindkey', 'max' + variable]]
-    return outdf
+        # Remove rows still containing a dash in 'naics_sector'
+        xwalk = xwalk[~xwalk['naics_sector'].str.contains("-")]
 
-
-def get_varmaxmindf(df4dig, fulldf, variable="emp1"):
-    '''
-    What is the point?
-        get_varmaxmindf() combines county by naics4 data with min/max bounds
-    Inputs:
-        1. df4dig - 4-digit NAICS level data
-        2. fulldf - Complete dataset
-    Returns:
-        DataFrame with original data plus minwage and maxwage columns
-    '''
-    # Merge employment data with wage data
-
-    # Get min and max wage bounds
-    mindf = get_varmin(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable)
-    maxdf = get_varmax(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable)
-    # Merge all data
-    df4_maxmin = df4dig.merge(maxdf, on="geoindkey", how="left") \
-        .merge(mindf, on="geoindkey", how="left")
-    df4_maxmin['min'+variable] = df4_maxmin['min'+variable].fillna(0)
-    return df4_maxmin
-
-#def adjust_negative_diff(df,count6dig)
+    return xwalk

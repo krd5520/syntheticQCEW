@@ -17,6 +17,7 @@ from config_reader import *
 from CBP_QWI_download import *
 from download_QCEWdata import *
 from preprocess_combine import *
+from adjustmentFunctions import *
 
 redownload=False
 
@@ -25,9 +26,11 @@ def start(config):
     readinData=0
     createCombined=0
     NAICS6time=0
-    generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig = check_config(config)
+    generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementaryConfig = check_config(config)
     startime=time.time()
+    print('---------- -------- -------- -------- ----------')
     print('---------- Retrieving or Loading Data ----------')
+    print('---------- -------- -------- -------- ----------')
     if generalConfig["SKIP_TO_MICRODATA"] is not None and generalConfig["SKIP_TO_MICRODATA"]:
         print('Reading in NAICS6 by County data from '+str(generalConfig["NAICS6_FILE"]))
         naics6df = pd.read_csv(str(generalConfig["NAICS6_FILE"]))  # , nrows=10000)
@@ -38,7 +41,9 @@ def start(config):
             df=pd.read_csv(generalConfig['COMBINED_DATA'],
                            usecols=['agglvl_code', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
                                     'emp3', 'emp2', 'emp1', 'wages',"year","qtr", 'emp1_source',"emp2_source","emp3_source",
-                                    "wages_source","geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5"]
+                                    "wages_source","geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
+                                    "domain","supersector","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag",'row_sources'],
+                           low_memory=True
                            )
             readinData=time.time()-startime
         elif preprocessConfig is not None:
@@ -83,22 +88,24 @@ def start(config):
                                     preprocessConfig=preprocessConfig,
                                outfilepath=preprocessConfig['OUTPATH'],
                                year=generalConfig['YEAR'])
-            df=df[['agglvl_code','emp3_cbp','wages_cbp','estnum_cbp',
+            master_colsave=['agglvl_code','emp3_cbp','wages_cbp','estnum_cbp',
                  'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
                  'emp3', 'emp2', 'emp1', 'wages', 'year_qtr',"year","qtr","estnum",
                    'emp1_source',"emp2_source","emp3_source","wages_source",
                    "geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
-                   "emp1_qwi","emp1_qcew"]].copy()
+                   "emp1_qwi","emp1_qcew","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag","row_sources"]
+            if "supersector" in df.columns:
+                colssave=master_colsave+["domain","supersector"]
+            else:
+                colssave=master_colsave
+            df=df[colssave].copy()
             print("Combined file is saved: "+str(generalConfig['COMBINED_DATA']))
             createCombined=time.time()-createcombinedstart
+            df = pd.read_csv(generalConfig['COMBINED_DATA'],
+                             usecols=colssave,low_memory=True
+                             )
 
-        #df.drop(columns=["Unnamed: 0", "estnum_qcew","disclosure_code","estnum_source",
-        #                 'emp1_qwi_flag', 'emp3_qwi_flag','lwbd_emp_qwi_flag', 'avg_month_emp_wages_flag',
-        #                'emp1_qcew',
-        #                 'emp2_qcew', 'emp3_qcew', 'wages_qcew'
-        #                 ], inplace=True, errors="ignore")
-        #print(df.columns)
-        df['year_qtr']=df['year'].astype(float)+(df["qtr"].astype(float)/4)
+        #df['year_qtr']=df['year'].astype(float)+(df["qtr"].astype(float)/4)
 
         tofloatcols = ['emp3_cbp', 'wages_cbp', 'estnum_cbp', 'year_qtr_cbp',
                  'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
@@ -106,7 +113,8 @@ def start(config):
         for x in tofloatcols:
             if x in df.columns:
                 df[x] = df[x].astype(float)
-        df.dropna(axis=0,how='any',subset='emp3',inplace=True) #remove ones missing emp3
+        #df.dropna(axis=0,how='any',subset='emp3',inplace=True) #remove ones missing emp3
+
         #print(f"NA count per column, out of {df.shape}")
         #print(df.isna().sum())
         #for cname in [x for x in df.columns if "_source" in x]:
@@ -115,16 +123,28 @@ def start(config):
         #print("after drop na")
         #print(pd.crosstab(df["emp1_source"],df["wages_source"],dropna=False))
         #print(pd.crosstab(df['emp1_source'],df['agglvl_code'],dropna=False))
+
         print(f'---------- Combined Data Done: Time {createCombined} ----------')
+        print('---------- -------- -------- -------- ----------\n')
+
+        print('\n---------- -------- -------- -------- ----------')
+        print('---------- Getting Complete County by NAICS-6 Data ----------')
+        print('---------- -------- -------- -------- ----------\n')
         startNAICS6=time.time()
-        naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig, df=df)
+        naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=supplementaryConfig, df=df)
         NAICS6time=time.time()-startNAICS6
+        print(f'---------- Complete County by NAICS-6 Done: Time {NAICS6time} ----------')
+        print('---------- -------- -------- -------- ----------\n')
+
+    print('\n---------- -------- -------- -------- ----------')
+    print('---------- Making Synthetic Microdata ----------')
+    print('This may take a while, please be patient...')
+    print('---------- -------- -------- -------- ----------\n')
     print('---------- Microdata Configuration ----------')
     startmicrodata=time.asctime()
     for key, value in microdataConfig.items():
         print(f"{key}: {value}")
-    print('---------- Making Synthetic Microdata ----------')
-    print('This may take a while, please be patient...')
+
     random.seed(microdataConfig['EST_SEED'])
     tempdf = make_syn_microdata(naics6df, numchunk=microdataConfig['NUMCHUNK'],
                                 outfoldername=microdataConfig['OUTPATH'])
@@ -134,9 +154,13 @@ def start(config):
     ################## Microdata Postprocessing #######################
     postprocessstart=time.time()
     print('---------- Generating Final Microdata ----------')
+
+
     combine_and_split_iterative(yr=generalConfig['YEAR'], qtr=generalConfig['QTR'])
     postprocessstime=time.time()-postprocessstart
     finaltime=time.time()-startime
+    print('\n---------- -------- -------- -------- ----------')
+    print('---------- -------- -------- -------- ----------\n')
     print("----------- Computation Time Summary ------------")
     print("reading in data (NAICS6 or combined data): "+str(readinData))
     if createCombined is not None:

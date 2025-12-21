@@ -96,7 +96,7 @@ def sub_downloadQWI(i,group,url,generalConfig,preprocessConfig,max_retries=3):
     for _, row in group.iterrows(): #for row in group
         fips_code = f"{int(row['FIPScode']):02d}" #fipscode
         paramsqwi = {
-            "get": "Emp,EmpEnd,EmpS,EarnBeg,sEmp,sEmpEnd,sEmpS,sEarnBeg,geography,ind_level,geo_level",
+            "get": "Emp,EmpEnd,EmpS,EarnBeg,sEmp,sEmpEnd,sEmpS,sEarnBeg,geography,ind_level,geo_level, ownercode",
             "for": "county:*",
             "in": f"state:{fips_code}",
             "year": generalConfig["YEAR"],
@@ -124,6 +124,8 @@ def sub_downloadQWI(i,group,url,generalConfig,preprocessConfig,max_retries=3):
         filename = f"{directory}qwi_co{i}.csv"
         os.makedirs(directory, exist_ok=True)
         df = pd.DataFrame(fulldf_pergroup, columns=response.json()[0])
+        df=df.loc[df['ownercode']=="A05",:]
+        df.drop(columns="ownercode",inplace=True)
         df.to_csv(filename, index=False)
         print(f"Saved part {i} with {len(group)} states to {filename}")
     else:
