@@ -120,7 +120,7 @@ def fill_from_geoindkey(data,numeric_ind_level=True,naics_xwalk=None):
 def count_notna(x):
     return x.notna().sum()
 
-def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=True,perestab_stats=False):
+def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=True,perestab_stats=False,naicsdf=None):
     '''
     What is the point?
         get_codes_summary() aggregates wage data (qp1) from detailed NAICS codes up to higher
@@ -173,8 +173,15 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
     df = dfin[dfin['geoindkey'].str.contains(pattern_grep, regex=True)].copy()
     #if set(df.index.values)!=set(dfin.loc[dfin['agglvl_code']==78,:].index.values):
     #    print(f"missing index {set(df.index.values)-set(dfin.loc[dfin['agglvl_code']==78,:].index.values)}")
+    if "geo"+str(groupbydigits)+"naics" in df.columns:
+        df["geodignaics"]=df["geo"+str(groupbydigits)+"naics"]
+    elif groupbydigits==2:
+        df["geo2naics"] = df["geoindkey"].str.slice(stop=-4)
+        df=geo2naics_dash_handler(df,naicsdata=naicsdf)
+        df['geodignaics']=df['geo2naics']
+    else:
+        df['geodignaics'] = df['geoindkey'].str[:str_end_idx]
 
-    df['geodignaics'] = df['geoindkey'].str[:str_end_idx]
     if include_source:
         df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable, variable+'_source']]
     elif variable=="estnum" or "estnum" not in df.columns:
@@ -222,6 +229,8 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
     count6dig["propmissing"].fillna(1)
     if onlyQCEW:
         variable=variable.replace("_qcew","")
+    if "geo"+str(groupbydigits)+"naics" in count6dig.columns:
+        count6dig.drop(columns="geo"+str(groupbydigits)+"naics",inplace=True)
     if perestab_stats and variable!="estnum":
         count6dig = count6dig.rename(columns={
             'geodignaics': f'geo{groupbydigits}naics',
@@ -293,3 +302,133 @@ def get_xwalk_naics(crosswalk_file,expand_naics2=True):
         xwalk = xwalk[~xwalk['naics_sector'].str.contains("-")]
 
     return xwalk
+
+def one_naics_code_below_filler(df,naicsdf):
+    onlyonebelow=[]
+    for ilvl in [2,3,4,5]:
+        grbydf=naicsdf.groupby(['naics'+str(ilvl),'ind_level']).size().reset_index()
+        grbydf.columns=["naics"+str(ilvl),"ind_level","count"]
+        grbydf=grbydf.loc[grbydf["ind_level"]!=ilvl,:]
+        ilvl_onebelow=grbydf.loc[(grbydf["ind_level"]==ilvl+1)&(grbydf["count"]<2),:].copy()
+        if ilvl_onebelow.shape[0]>0:
+            lwdf = naicsdf.loc[
+                naicsdf["ind_level"] == ilvl + 1, ["naics" + str(ilvl), "formatted_code", "ind_level", "naics"]]
+            lwdf["additional_digit"]=lwdf["naics"].astype(str).str.slice(start=-1)
+            codesbelow = lwdf.loc[
+                lwdf["naics" + str(ilvl)].isin(ilvl_onebelow["naics" + str(ilvl)].to_list()), ["formatted_code",
+                                                                                               "naics" + str(ilvl),
+                                                                                               "additional_digit"]]
+            codesbelow.rename(columns={"naics" + str(ilvl): "code", "formatted_code": "single_code_level_below"},
+                              inplace=True)
+            ilvl_onebelow["code"]=ilvl_onebelow['naics'+str(ilvl)]
+            ilvl_onebelow.drop(columns="naics"+str(ilvl),inplace=True)
+            ilvl_onebelow=ilvl_onebelow.merge(codesbelow,on="code",how="left",indicator=False)
+            onlyonebelow.append(ilvl_onebelow)
+    onebelowdf=pd.concat(onlyonebelow)
+    onebelowdf["formatted_code"]=onebelowdf["code"].map(format_industry_from_code)
+    #print(onebelowdf.describe())
+    print(onebelowdf[["additional_digit","formatted_code","single_code_level_below"]].head(10))
+    print(onebelowdf.shape)
+    print(onebelowdf['additional_digit'].value_counts())
+    print(onebelowdf.loc[~onebelowdf["additional_digit"].isin(["0","1","9"]),["additional_digit","formatted_code","single_code_level_below","ind_level"]])
+    if "industry" not in df.columns:
+        df["industry"]=df['geoindkey'].str.split("_")[1]
+    for ilvl in [2,3,4,5]:
+        df=one_level_one_naics_code_below_filler(df,onebelowdf,level=ilvl)
+    return(df)
+
+def one_level_one_naics_code_below_filler(df,onebelowdf,level=2):
+    onelevelonebelow=onebelowdf.loc[onebelowdf["ind_level"]==level+1,:]
+    lwcode_indf = df["industry"].isin(onelevelonebelow["single_code_level_below"].tolist()).sum()
+    if lwcode_indf==0:
+        repdf=df.loc[df["industry"].isin(onelevelonebelow["formatted_code"].tolist())].copy()
+        repdf["agglvl_code"]=repdf["agglvl_code"]+1
+        for add_digit in list(onelevelonebelow["additional_digit"].unique()):
+            add_digit_indic=repdf["industry"].isin(onelevelonebelow.loc[onelevelonebelow["additional_digit"]==add_digit,"formatted_code"].tolist())
+            if level==2:
+                repdf.loc[add_digit_indic,"geoindkey"]=repdf.loc[add_digit_indic,'geoindkey'].str.replace("----",str(add_digit)+"///")
+                repdf.loc[add_digit_indic,"industry"]=repdf.loc[add_digit_indic,'industry'].str.replace("----",str(add_digit)+"///")
+            else:
+                repdf.loc[add_digit_indic,"geoindkey"] = repdf.loc[add_digit_indic,'geoindkey'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
+                repdf.loc[add_digit_indic,"industry"] = repdf.loc[add_digit_indic,'industry'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
+            for naics_col in [col for col in repdf.columns if "naics" in col.lower() and str(level+1) in col.lower()]:
+                repdf[naics_col]=repdf[naics_col].astype(str)
+                repdf.loc[add_digit_indic,naics_col]=repdf.loc[add_digit_indic,naics_col].str+str(add_digit)
+        df=pd.concat(df,repdf)
+    return df
+
+
+
+
+def process_naics_file(code_file,code_col=1,code_sep=','):
+    codedf = pd.read_csv(code_file, sep=code_sep)
+    if code_col in codedf.columns:
+        codedf['naics'] = codedf.loc[:, code_col]
+    else:
+        codedf["naics"] = codedf.iloc[:, code_col]
+    dashI = codedf["naics"].astype(str).str.contains("-")
+    if dashI.sum() > 0:
+        dashdf = codedf.loc[dashI, :]
+        list_dfs = [codedf.loc[~dashI, :]]
+        startcode_dict={}
+        for dashcode in dashdf["naics"].unique():
+            splitcode = dashcode.split("-")
+            startcode = splitcode[0].strip()
+            endcode = splitcode[1].strip()
+            ncodes = float(endcode) - float(startcode) + 1
+            rw = dashdf.loc[dashdf["naics"] == dashcode, :]
+            dfrep = rw.loc[rw.index.repeat(ncodes)].reset_index()
+            list_codes=list(range(int(float(startcode)), int(float(endcode) + 1)))
+            dfrep["naics"] = list_codes
+            list_dfs.append(dfrep)
+            startcode_dict[startcode]=list_codes
+        codedf = pd.concat(list_dfs)
+    codedf["ind_level"] = codedf['naics'].astype(str).str.count(r'\d')
+    naicsdf=codedf.loc[:,["ind_level","naics"]]
+    for ilvl in [6,5,4,3,2]:
+        naicsdf['naics' + str(ilvl)] = naicsdf['naics'].astype(str).str.slice(stop=ilvl)
+        naicsdf["formatted_code"]=naicsdf["naics"].map(format_industry_from_code)
+        if ilvl==2 and dashI.sum() > 0:
+            naicsdf["dashed_naics2"]=False
+            for key,value in startcode_dict.items():
+                naicsdf.loc[naicsdf["naics2"].astype(str).isin([str(val) for val in value]),"naics2"]=key
+                naicsdf.loc[naicsdf["naics2"].astype(str).isin([str(val) for val in value]),"dashed_naics2"]=True
+    return naicsdf
+
+# takes a single code and formats it like the industry portion of the geoindkey
+def format_industry_from_code(code):
+    code=str(code).strip()
+    if len(code)==2:
+        return code.ljust(6,"-")
+    else:
+        return code.ljust(6,"/")
+
+def geo2naics_dash_handler(data,naicsdata=None):
+    if naicsdata is None: #use 2012 default
+        dashdict={"31":[31,32,33],
+                  "44":[44,45],
+                  "48":[48,49]}
+
+    else:
+        dashdict={}
+        for dash2 in naicsdata.loc[(naicsdata["dashed_naics2"])&(naicsdata["ind_level"]==2),"naics2"].to_list():
+            dashdict[str(dash2)]=list(naicsdata.loc[(naicsdata["naics2"].astype(str)==str(dash2))&(naicsdata["ind_level"]==3),"naics3"].astype(str).str.slice(stop=2).unique())
+    for key,value in dashdict.items():
+        data["geo2naics"]=data["geo2naics"].str.replace("|".join(["_"+str(val) for val in value]),"_"+str(key),regex=True)
+    return data
+
+
+
+#with open('config_pre2017.yaml', 'r') as configFile:
+#     config = yaml.safe_load(configFile)
+#preprocessConfig = config['preprocessConfig']
+#generalConfig = config['generalConfig']
+#foldername = preprocessConfig['DATA_IN_FOLDER']
+#
+#dftemp=pd.read_csv("DataDiag/PythonPreprocessOut/combine_data_1208.csv")
+#dftemp=dftemp.iloc[:,1:]
+#print(dftemp.columns)
+#naicsdf=process_naics_file(generalConfig['NAICS_FILE'])
+#temp=one_naics_code_below_filler(dftemp,naicsdf)
+#print(temp.head())
+#print(temp.columns)

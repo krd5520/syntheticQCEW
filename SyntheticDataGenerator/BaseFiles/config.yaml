@@ -11,6 +11,8 @@ generalConfig:
   FIPS_STATE_FILE: "DataDiag/FIPSstatecodename.txt" #comma-sep file of FIPS state codes and names
   FULL_FIPS_FILE: "DataDiag/FIPSareacode_full.csv" #optional to download QCEW data.
   NAICS_FILE: "DataDiag/2012_codes.csv"
+  NAICS_CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
+
 
 ## To combine the CBP, imputedCBP (optional), QWI, and QCEW (optional) data
 preprocessConfig:
@@ -56,5 +58,4 @@ microdataConfig:
   WAGE_MIN: 10
   NUMCHUNK: 35 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
   SUBSET_OUTPATH: "DataDiag/PythonMicrodataSubsets/"
-  CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
   OUTPATH: "./FinalMicrodata"

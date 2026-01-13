@@ -53,11 +53,21 @@ To use the synthetic data generator follow these steps:
 	```
 2. Download all required Census datasets:
 **Note:** If you have trouble obtaining an API key, you can check the section `#Alternative Method for downloading datasets` for alternative download steps.
-	* Run the python script `CBP_QWI_download.py`	which will automatically download the required County Business Patterns (CBP) and Quarterly Workforce Indicators (QWI) datasets and place them in the directories specified in `config.yaml`
-	* Download the CBP dataset imputed by Eckert Et al. https://doi.org/10.3886/E117464V1
-		1. Select `Imputed-CBP-Files/efsy_cbp_2016.zip`
-		2. Extract the the archive using `7z`
-		4. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml`
+	* With an API key, the `main.py` will automatically download the required County Business Patterns (CBP) and Quarterly Workforce Indicators (QWI) datasets and place them in the directories specified in `config.yaml`
+	* The `main.py` will also automatically download the required Quarterly Census of Employment and Wages from the Bureau of Labor Statistics and place it in the directory specified in `config.yaml`
+	* Download the CBP dataset imputed by Eckert Et al. https://doi.org/10.3886/E117464V1 and place the csv file(s) in the `ImputeCBP/` directory specified in `config.yaml (See options below)
+	
+  Download Imputed CBP through Data Lumos:
+    1. Access the data through Data Lumos https://doi.org/10.3886/E117464V1
+	  2. Select `Imputed-CBP-Files/efsy_cbp_2016.zip`
+	  3. Extract the the archive using `7z`
+	  4. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml`
+  Download Imputed CBP through Eckert webpage:
+	  1. Alternatively (or in addition to) download the relevant data from https://fpeckert.me/cbp/
+	  2. Extract the the archive using `7z`
+	  3. Locate the imputed data csv file in the archive `Final_Imputed/efsy_cbp_2016.csv`
+	  4. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml
+	
 ### Changing parameters and model formulas
 Change parameters and models defined in `config.yaml` to suit your needs
 ### Generating Synthetic QCEW data:
@@ -104,4 +114,6 @@ If for some reason you are unable to obtain an API key from census.gov, you may 
 1. Navigate to https://www.census.gov/data/datasets/2016/econ/cbp/2016-cbp.html
 2. Select County File
 3. Extract the archive and save as `cbp16co.txt` in the `CBPdataRaw` directory specified in `config.yaml`   
+
+
 

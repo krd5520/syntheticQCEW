@@ -19,7 +19,10 @@ from download_QCEWdata import *
 from preprocess_combine import *
 from adjustmentFunctions import *
 
-redownload=False
+## hardcoded variable (shouldn't change?)
+naics_file_sep="," #sep for generalConfig["NAICS_FILE"]
+naics_file_code_col=1 #column corresponding to naics codes at all levels in generalConfig["NAICS_FILE"]
+
 
 
 def start(config):
@@ -31,6 +34,10 @@ def start(config):
     print('---------- -------- -------- -------- ----------')
     print('---------- Retrieving or Loading Data ----------')
     print('---------- -------- -------- -------- ----------')
+    if generalConfig["NAICS_FILE"] is not None:
+        naicsdf = process_naics_file(generalConfig["NAICS_FILE"], code_col=naics_file_code_col, code_sep=naics_file_sep)
+    else:
+        naicsdf = None
     if generalConfig["SKIP_TO_MICRODATA"] is not None and generalConfig["SKIP_TO_MICRODATA"]:
         print('Reading in NAICS6 by County data from '+str(generalConfig["NAICS6_FILE"]))
         naics6df = pd.read_csv(str(generalConfig["NAICS6_FILE"]))  # , nrows=10000)
@@ -87,17 +94,19 @@ def start(config):
                                     generalConfig=generalConfig,
                                     preprocessConfig=preprocessConfig,
                                outfilepath=preprocessConfig['OUTPATH'],
-                               year=generalConfig['YEAR'])
+                               year=generalConfig['YEAR'],
+                                    naicsdf=naicsdf)
             master_colsave=['agglvl_code','emp3_cbp','wages_cbp','estnum_cbp',
                  'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
                  'emp3', 'emp2', 'emp1', 'wages', 'year_qtr',"year","qtr","estnum",
                    'emp1_source',"emp2_source","emp3_source","wages_source",
                    "geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
-                   "emp1_qwi","emp1_qcew","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag","row_sources"]
+                   "emp1_qwi","emp1_qcew","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag","row_sources","geo2naics","geo3naics","geo4naics","geo5naics"]
             if "supersector" in df.columns:
                 colssave=master_colsave+["domain","supersector"]
             else:
                 colssave=master_colsave
+
             df=df[colssave].copy()
             print("Combined file is saved: "+str(generalConfig['COMBINED_DATA']))
             createCombined=time.time()-createcombinedstart
@@ -113,6 +122,7 @@ def start(config):
         for x in tofloatcols:
             if x in df.columns:
                 df[x] = df[x].astype(float)
+
         #df.dropna(axis=0,how='any',subset='emp3',inplace=True) #remove ones missing emp3
 
         #print(f"NA count per column, out of {df.shape}")
@@ -131,7 +141,7 @@ def start(config):
         print('---------- Getting Complete County by NAICS-6 Data ----------')
         print('---------- -------- -------- -------- ----------\n')
         startNAICS6=time.time()
-        naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=supplementaryConfig, df=df)
+        naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=supplementaryConfig, df=df,naicsdf=naicsdf)
         NAICS6time=time.time()-startNAICS6
         print(f'---------- Complete County by NAICS-6 Done: Time {NAICS6time} ----------')
         print('---------- -------- -------- -------- ----------\n')

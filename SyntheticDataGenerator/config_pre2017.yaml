@@ -10,6 +10,17 @@ generalConfig: ## This section is used generally throughout the process.
   FIPS_STATE_FILE: "DataDiag/FIPSstatecodename.txt" #comma-sep file of FIPS state codes and names
   FULL_FIPS_FILE: "DataDiag/FIPSareacode_full.csv" #optional to download QCEW data.
   NAICS_FILE: "DataDiag/2012_codes.csv"
+  BLS_NAICS_CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
+
+## Suplementary data for combining for regressions
+otherdataConfig:
+ DATA_IN_FOLDER: "DataDiag/DataIn/"
+ COUNTY_DATA: "rural_urban_fips.txt"
+ COUNTY_DATA_SEP: "tab"
+ COUNTY_FIPS_COLNAME: "FIPS"
+
+
+
 
 ## To combine the CBP, imputedCBP (optional), QWI, and QCEW (optional) data
 preprocessConfig:
@@ -25,7 +36,7 @@ preprocessConfig:
  
 ## For imputation of County by NAICS-4 monthly employment
 employmentConfig:
-  OLS_FORMULA: "np.sqrt(emp1diff) ~ C(state) +C(naics2)+  poly(np.sqrt(emp3),3) + emp1_propmissing6by4+estnum+estnum:emp1_propmissing6by4+emp1_propmissing6by4:np.sqrt(emp3)"
+  OLS_FORMULA: "np.sqrt(emp1diff) ~ C(state) +  np.sqrt(emp3) +emp1_propmissing6by4+count6by4codes+np.sqrt(emp3):emp1_propmissing6by4"
   M2EMP_NOISECOEF: 1.69
   COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
   OUTLIER_THRESH: 3.0 # Threshold for outliers using studentized residuals 
@@ -34,7 +45,7 @@ employmentConfig:
 
 ## For imputation of County by NAICS-4 monthly quarterly wages
 wageConfig:
-  OLS_FORMULA: "np.sqrt(wagesdiff) ~ C(state)+ estnum  + wages_sum6by4 + wages_propmissing6by4:estnum+wages_propmissing6by4 + poly(emp3,3)"
+  OLS_FORMULA: "np.log(wagesdiff) ~ C(state)+ C(supersector)+C(RUCC_2013)+wages_propmissing6by4 + poly(np.sqrt(wages_missing6by4),3)+poly(np.sqrt(emp3),3)"
   COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance (filters out 1 observation)
   OUTLIER_THRESH: 3.0 # Threshold for outliers using studentized residuals (
   RSEED: 5 # This RSEED is for employment imputation

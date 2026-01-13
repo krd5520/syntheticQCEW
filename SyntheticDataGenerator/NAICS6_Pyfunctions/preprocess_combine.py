@@ -395,248 +395,6 @@ def read_qwi_co(folderpath,generalConfig):
     qwidf.drop_duplicates(inplace=True)
     return(qwidf)
 
-## Combine QWi and CBP Data
-# INPUTS:
-#       rawfile: str for file path of raw cbp county data
-#       imputedfile: str for file path of imputed cbp data
-#       qwifolder: str for folder path of folder that includes qwi files with county-level names including "co"
-#       printdiagnostics: logical, if True print shapes of CBP and QWI data and count row in imputed CBP not in QWI
-# OUTPUTS: pd.dataframe of combined CBP and QWI
-def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1,suppressedqwi=5,only_cbp_codes=True):
-    state_abbr = {
-        "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
-        "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
-        "21": "ky", "22": "la", "23": "me", "24": "md", "25": "ma", "26": "mi", "27": "mn", "28": "ms", "29": "mo",
-        "30": "mt", "31": "ne", "32": "nv", "33": "nh", "34": "nj", "35": "nm", "36": "ny", "37": "nc", "38": "nd",
-        "39": "oh", "40": "ok", "41": "or", "42": "pa", "44": "ri", "45": "sc", "46": "sd", "47": "tn", "48": "tx",
-        "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
-    }
-    allowedstates=state_abbr.keys()
-    if "STATES" in generalConfig:
-        if generalConfig["STATES"] is None or "ALL" in generalConfig['STATES']:
-            pass
-        else:
-            fipscodes_df=pd.read_csv(generalConfig['FIPS_STATE_FILE'])
-            states=generalConfig["STATES"]
-            fipscode = fipscodes_df.iloc[:, 0].astype(str).str.upper()  # standardize format col1
-            stateselect = (fipscode.isin(states))  # initialize the logical to select states
-            if len(fipscodes_df.columns) > 1:  # if there are more than 1 column
-                for colname in fipscodes_df.columns:  # iterate columns to create logical
-                    fipscode = fipscodes_df[colname].astype(str).str.upper()
-                    stateselect = (stateselect) | (fipscode.isin(states))
-            subfips=fipscodes_df[stateselect]
-            allowedstates = subfips.iloc[:,0].values  # subset
-    onlyraw=False
-    if diagnosticsfile is not None:
-        printdiagnostics=True
-    else:
-        printdiagnostics=False
-    qwi = read_qwi_co(qwifolder,generalConfig)  # read all qwi county files
-    qwi=qwi.loc[qwi['state'].astype(str).isin([str(st) for st in allowedstates]),:].copy()
-
-    flagCols = ["semp1_qwi", "semp3_qwi", "sEmpS", "sEarnBeg"]
-    iter=0
-    qwi['agglvl']=qwi['agglvl_code'].astype(str)+"_lvl"
-    for fcol in flagCols:
-        iter=iter+1
-        qwi.loc[qwi[fcol].astype(float)==suppressedqwi,fcol[1:]]=np.nan
-    #flagcodes = None
-    #for fcol in flagCols:
-    #    setcodes = set(qwi[fcol].unique())
-    #    if flagcodes is None:
-    #        flagcodes = setcodes
-    #    else:
-    #        flagcodes = flagcodes.union(setcodes)
-    #notsuppressedqwi = [notsuppressedqwi]
-    #suppressedqwi = list(flagcodes - set(notsuppressedqwi))
-    #if not isinstance(suppressedqwi,list):
-    #    suppressedqwi=[suppressedqwi]
-    #iter = 0
-    #for fcol in flagCols:
-    #    iter += 1
-    #    notsup = qwi[fcol].isin(notsuppressedqwi)
-    #    qwi.loc[~notsup, fcol[1:]] = np.nan
-        if printdiagnostics:
-            fcolname = fcol.replace("_qwi", "")
-            fcolname = fcolname[1:]
-            tempxtab = pd.crosstab(qwi['agglvl'], qwi[fcol]).join(
-                pd.crosstab(qwi['agglvl'], qwi[fcol], normalize="index"),
-                on="agglvl", how='outer', lsuffix='_count', rsuffix='_prop', sort=True)
-            countsup = tempxtab[str(suppressedqwi)+"_count"]
-            pctsup = tempxtab[str(suppressedqwi)+"_prop"]
-            #else:
-            #    countsup = tempxtab[[str(x)+"_count" for x in suppressedqwi]].sum(axis=1)
-            #    pctsup = countsup.div(tempxtab[[str(x)+"_count" for x in suppressedqwi]].sum(axis=1))
-            if iter == 1:
-                xtab = pd.DataFrame({'n_cells': tempxtab[[str(x)+"_count" for x in [notsuppressedqwi,suppressedqwi]]].sum(axis=1),
-                                     "" + fcolname: countsup,
-                                     "%" + fcolname: pctsup.multiply(100).round(0)},
-                                    index=tempxtab.index)
-                xtabQWI = xtab
-            else:
-                xtab = pd.DataFrame(
-                    {"" + fcolname: countsup,
-                     "%" + fcolname: pctsup.multiply(100).round(0)},
-                    index=tempxtab.index)
-                xtabQWI = xtabQWI.join(xtab, on="agglvl", how="outer", lsuffix="", rsuffix="_" + fcolname)
-    qwi.drop(columns="agglvl",inplace=True,errors="ignore")
-    if not os.path.isfile(rawfile):
-        print(f"Cannot locate file named {rawfile} ")
-    else:
-        raw = pd.read_table(rawfile, sep=",")  # read raw CBP file for counties in 50 states
-
-    if not os.path.isfile(imputedfile):
-        if float(year)<2017:
-            print(f"Cannot locate file named {imputedfile} ")
-        else:
-            imputeCBP=None
-            onlyraw=True
-    else:
-        onlyraw=False
-        imputeCBP = preprocess_imputedCBP_file(imputedfile)  # read imputed data file (only includes Mid March Employment)
-    if not os.path.exists(qwifolder):
-        raise Exception(f"Cannot locate directory named {qwifolder} ")
-
-    # combine imputted and raw
-    if printdiagnostics:
-        cbp, supptabCBP = combine_CBP_raw_imputed(raw,imputeCBP,generalConfig=generalConfig,onlyraw=onlyraw,supptab=printdiagnostics)
-    else:
-        cbp = combine_CBP_raw_imputed(raw,imputeCBP,generalConfig=generalConfig,onlyraw=onlyraw)
-
-    #cbp=cbp.loc[cbp['state'].isin(allowedstates),:]
-    if generalConfig['QTR']==4:
-        cbp['year_qtr_cbp']=float(generalConfig['YEAR'])+1.25
-    else:
-        cbp['year_qtr_cbp'] = float(generalConfig['YEAR']) + 0.25
-
-
-
-    #combine QWI and CBP
-    cbp["state"] = cbp["state"].astype(int).astype(str)
-    cbp["cnty"] = cbp["cnty"].astype(int).astype(str).str.zfill(3)
-    #cbp["ind_level"] = cbp["ind_level"].astype(int).astype(str)
-    qwi["state"] = qwi["state"].astype(int).astype(str)
-    qwi["cnty"] = qwi["cnty"].astype(int).astype(str).str.zfill(3)
-    qwi["ind_level"] = qwi["ind_level"].astype(int).astype(str)
-    combinedf = cbp.merge(qwi,how="outer",on=np.intersect1d(np.array(qwi.columns.values),np.array(cbp.columns.values)).tolist(),indicator=True,suffixes=["_cbp","_qwi"],validate="one_to_one")
-
-    combinedf.reset_index(drop=True,inplace=True)
-    cbp.reset_index(drop=True,inplace=True)
-
-    cbpidx=cbp['agglvl_code'].isin(qwi['agglvl_code'].unique())#pd.Series([False]*len(cbp))
-    combineidx=combinedf['agglvl_code'].isin(qwi['agglvl_code'])
-
-    qwilevels=qwi['agglvl_code'].astype(str).unique()
-    restrictions_str="Restricted to common aggregate levels ("+', '.join(qwilevels)+")"
-
-    misscount2 = sum(combinedf.loc[combineidx,'_merge'] == "left_only")
-    misscount1 = sum(combinedf['_merge'] == "right_only")
-    misscount4 = sum(combinedf['_merge_rawimpute'] == "raw_only")
-    #possible diagnostics
-    if not os.path.exists(outfilepath):
-        os.mkdir(outfilepath)
-    if printdiagnostics:
-        cbp=cbp.reset_index(drop=True)
-        misscount2_prop=0
-        misscount1_prop=0
-        if misscount2>0 and cbp[cbpidx].shape[0]>0:
-            misscount2_prop=round((misscount2/cbp[cbpidx].shape[0])*100)
-        if misscount1>0 and qwi.shape[0]>0:
-            misscount1_prop=round((misscount1/qwi.shape[0])*100)
-        with open(outfilepath+diagnosticsfile,'w') as f:
-            os.makedirs(os.path.dirname(outfilepath), exist_ok=True)
-            print("Number of rows,columns in combined CBP: ",cbp.shape,file=f)
-            print("Number of rows,columns in QWI: ", qwi.shape, file=f)
-            print("Number of rows in CBP but not QWI "+restrictions_str+": "+str(misscount2)+"("+str(misscount2_prop)+"%)", file=f)
-            print("Number of rows in QWI but not combined CBP: "+str(misscount1)+"("+str(misscount1_prop)+"%)", file=f)
-            print("Number of rows in raw CBP but not imputed CBP: ", misscount4, file=f)
-            print("--"*20,file=f)
-            print("----- CBP Suppression Table -----",file=f)
-            print("--"*20,file=f)
-        #supptabCBP.set_index("agglvl")
-        write_pipe_table(df=supptabCBP, filename=outfilepath+diagnosticsfile,include_index=False)
-
-        #supptabCBP.to_csv(outfilepath+diagnosticsfile,sep=",",mode='a',index=False)
-        with open(outfilepath + diagnosticsfile, 'a') as f:
-            print("--" * 20, file=f)
-            print("----- QWI Suppression Table -----", file=f)
-            print("--" * 20, file=f)
-        write_pipe_table(df=xtabQWI.T, filename=outfilepath+diagnosticsfile,include_index=True)
-
-        #xtabQWI.to_csv(outfilepath+diagnosticsfile,sep=",",mode="a")
-
-    combinedf = combinedf.drop(columns=['_merge','_merge_rawimpute'])
-    #combinedf=fill_from_geoindkey(combinedf)
-    combinedf['year']=generalConfig["YEAR"]
-
-    #fill when lb and ub
-    if "lb" in combinedf.columns and combinedf['emp3_cbp'].isna().sum()>0:
-        combinedf.loc[combinedf['emp3_cbp'].isna(),"emp3_cbp"]=combinedf.loc[combinedf['emp3_cbp'].isna(),:].apply(random_midpoint,axis=1)
-
-    #rename columns
-    combinedf.rename(columns={"EmpS": "lwbd_emp_qwi",
-                              "sEmpS": "lwbd_emp_qwi_flag",
-                              "semp1_qwi": "emp1_qwi_flag",
-                              "semp3_qwi":"emp3_qwi_flag",
-                              "EarnBeg":"avg_month_emp_wages",
-                              "sEarnBeg":"avg_month_emp_wages_flag"}, inplace=True)
-    #scale CBP wages to match QWI (avg_month_emp_wages) and QCEW (if applicable)
-    combinedf['wages_cbp']=combinedf['wages_cbp']*1000
-    if "QCEWDIR" not in preprocessConfig or preprocessConfig["QCEWDIR"] is None:
-        combinedf = fill_from_geoindkey(combinedf,naics_xwalk=generalConfig['NAICS_CROSSWALK'])
-        combinedf=combinedf[combinedf['estnum'].notna()]
-        combinedf['cnty'] = combinedf['cnty'].astype("str")
-        combinedf['ind_level'] = combinedf['ind_level'].astype("str")
-        if generalConfig['QTR'] != 1:
-            print("Adjusting the values of CBP to match quarter " + str(generalConfig["QTR"]))
-            combinedf = quarter_source_adjustment(combinedf, generalConfig, "wages", quarterConfig=quarterConfig,
-                                               adjust_source=False, rseed=rseed)
-        ## Adjust values
-        #print("Using QCEW when available...")
-        combinedf["wages"]=combinedf['wages_cbp']
-        combinedf["wages_source"]="cbp"
-        combinedf.loc[combinedf["wages"].isna(),"wages_source"]=""
-        for vname in ["emp1", "emp3"]:
-            combinedf[vname] = combinedf[vname + "_qwi"]
-            combinedf[vname + "_source"] = ""
-            combinedf.loc[~combinedf[vname].isna(), vname + "_source"] = "qwi"
-        print("When QWI emp3 is not available, use CBP.")
-        combinedf = quarter_source_adjustment(combinedf, generalConfig, "emp3", quarterConfig=None,
-                                       formula="emp3~emp3_cbp-1",
-                                       adjust_source=True, source="CBP", rseed=rseed)
-
-        if outfilepath in outfilename:
-            combinedf.to_csv(outfilename)
-        else:
-            combinedf.to_csv(outfilepath + outfilename)
-        fullcombine=combinedf.copy()
-
-    else:
-        combinedf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
-        combinedf['cnty'] = combinedf['cnty'].astype("str")
-        combinedf['ind_level'] = combinedf['ind_level'].astype("str")
-
-        qcew = pd.read_csv(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig["QCEWDIR"] + "qcew_part.csv")
-        fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig,quarterConfig)
-        fullcombine=fullcombine[fullcombine['estnum'].notna()].copy()
-        if only_cbp_codes:
-            for exclude_code in excluded_cbp:
-                exclude_code=exclude_code.replace("-","").replace("/","")
-                ndig=len(str(exclude_code))
-                if ndig==6:
-                    fullcombine=fullcombine.loc[fullcombine.loc[:,"industry"]!=exclude_code,:]
-                else:
-                    fullcombine = fullcombine.loc[fullcombine.loc[:, "naics" + str(ndig)]!= exclude_code,:]
-        if outfilename is None:
-            print(f'Not saving combined data to a csv. No filepath provided.')
-        elif outfilepath is not None:
-            if outfilepath in outfilename:
-                fullcombine.to_csv(outfilename)
-            else:
-                fullcombine.to_csv(outfilepath + outfilename)
-        else:
-            fullcombine.to_csv(outfilename)
-    return(fullcombine)
 
 def qcew_format_geoindkey(data_row): #for QCEW
     naics_code=str(data_row['industry_code'])
@@ -655,7 +413,7 @@ def qcew_format_geoindkey(data_row): #for QCEW
     data_row["industry_code"]=naics_code
     return data_row
 
-def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig,remove_xtra_agglvl=True,suppression_flag="N",rseed=None):
+def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig,remove_xtra_agglvl=True,suppression_flag="N",rseed=None,naicsdf=None,only_cbp_codes=True):
     if rseed is not None:
         np.random.seed(rseed)
     if remove_xtra_agglvl:
@@ -688,44 +446,31 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
     for var in ["emp1_qcew","emp2_qcew","emp3_qcew","wages_qcew"]:
         data.loc[suppressed,var]=np.nan
     data=fill_from_geoindkey(data,numeric_ind_level=True)
-    #combine['cnty']=combine['cnty'].astype("str")
-    #combine['state'] = combine['state'].astype("str")
-    #combine['geography'] = combine['geography'].astype("str")
-    #geoindkey_inter=set(np.intersect1d(np.array(data['geoindkey'].str.slice(start=0,stop=5)), np.array(combine['geoindkey'].str.slice(start=0,stop=5))).tolist())
+
     combine.drop(columns={'ind_level','industry','state','cnty','geography','agglvl_code'},inplace=True)
-    #temp=combine['geoindkey'].value_counts()
-    #print(type(temp))
-    #print(temp[temp>1])
-    #temp2 = data['geoindkey'].value_counts()
-    #print(type(temp2))
-    #print(temp2[temp2 > 1])
+
 
     colscomb = np.intersect1d(np.array(data.columns.values), np.array(combine.columns.values)).tolist()
     colscomb=[x for x in colscomb if x in ["year","qtr","geoindkey"]]
     combine.loc[combine['qtr'].isna(),'qtr']=generalConfig['QTR']
 
-    #print(combine.dtypes)
-    #print(data.dtypes)
+
     melddf = data.merge(combine, how="outer",
                           on=colscomb,
                           indicator=True, suffixes=["_qcew", "_other"], validate="one_to_one")
     melddf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
-    melddf=fill_from_geoindkey(melddf,numeric_ind_level=True,naics_xwalk=generalConfig['NAICS_CROSSWALK'])
+    melddf=fill_from_geoindkey(melddf,numeric_ind_level=True,naics_xwalk=generalConfig['BLS_NAICS_CROSSWALK'])
 
     melddf["_merge"] = melddf["_merge"].cat.rename_categories(
         {'right_only': 'cbp_qwi_only', 'left_only': 'qcew_only', "both": "both"})
 
     melddf['row_sources']=melddf['_merge'].astype(str)
-    #melddf.loc[(melddf['row_sources'] == "qcew_only") & (melddf['industry'].isin(excluded_cbp)), 'row_sources'] = "qcew_only_Xcbpcodes"
     melddf.loc[(melddf['row_sources'] == "cbp_qwi_only") & (melddf['emp3_cbp_flag'].isna()), 'row_sources'] = "qwi_only"
     melddf.loc[(melddf['row_sources'] == "cbp_qwi_only") & (melddf['emp3_qwi_flag'].isna()), 'row_sources'] = "cbp_only"
     melddf.loc[melddf['row_sources'] == "cbp_qwi_only", 'row_sources'] = "all_but_qcew"
     melddf.loc[(melddf['row_sources'] == "both") & (melddf['emp3_cbp_flag'].isna()), 'row_sources'] = "all_but_cbp"
-    #melddf.loc[(melddf['row_sources'] == "both") & (melddf['emp3_cbp_flag'].isna())& (melddf['industry'].isin(excluded_cbp)), 'row_sources'] = "all_but_Xcbpcodes"
     melddf.loc[(melddf['row_sources'] == "both") & (melddf['emp3_qwi_flag'].isna()), 'row_sources'] = "all_but_qwi"
     melddf.loc[melddf['row_sources'] == "both", 'row_sources'] = "all_three"
-
-    #print(pd.crosstab(melddf['row_sources'],melddf['agglvl_code'],))
 
     ## Ran this code to discover industry codes starting with 92 are all qwi_only, and this accounts for many of the qwi_only
     # print(pd.crosstab(melddf['industry'].str.startswith("92",na=False),melddf['row_sources']=="qwi_only"))
@@ -750,67 +495,316 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
         #xtabs.to_csv(preprocessConfig['OUTPATH'] + preprocessConfig["DIAGNOSTIC_FILE"],sep=",",mode="a")
     melddf.drop(columns=["area_fips","industry_code","geo_level","ind_level",'_merge'],inplace=True)
     melddf=melddf[melddf['row_sources']!="qwi_only"]
-    if keep_only_emp3_filled:
-        melddf=melddf.loc[(melddf["emp3_qcew"].notna())|(melddf["emp3_cbp"].notna())|(melddf["emp3_qwi"].notna()),:]
 
-    ### Investigation of missing values by source, commented out
-    # perestab=melddf
-    # perestab['emp3_perestab_qcew']=perestab['emp3_qcew']/perestab['estnum_qcew']
-    # perestab['emp3_perestab_cbp']=perestab['emp3_cbp']/perestab['estnum_cbp']
-    # perestab['wages_perestab_qcew'] = perestab['wages_qcew'] / perestab['estnum_qcew']
-    # perestab['wages_perestab_cbp'] = perestab['wages_cbp'] / perestab['estnum_cbp']
-    # perestab['wages_perestab_qcew_min_cbp']=perestab['wages_perestab_qcew']-perestab['wages_perestab_cbp']
-    # perestab['emp3_perestab_qcew_min_cbp']=perestab['emp3_perestab_qcew']-perestab['emp3_perestab_cbp']
-    # perestab['estab_qcew_min_cbp']=perestab['estnum_qcew']-perestab['estnum_cbp']
-    # perestab['emp3_qcew_min_cbp']=perestab['emp3_qcew']-perestab['emp3_cbp']
-    # perestab['wages_qcew_min_cbp'] = perestab['wages_qcew'] - perestab['wages_cbp']
-    # for agglvl in [71,74,75,76,77,78]:
-    #     perestab1=perestab.loc[perestab['agglvl_code']==agglvl,:]
-    #     print(f'\nagglvl={agglvl}: mean qcew-cbp estnum {perestab1["estab_qcew_min_cbp"].mean()} median {perestab1["estab_qcew_min_cbp"].median()}\n mean qcew-cbp emp3={perestab1["emp3_qcew_min_cbp"].mean()} per estab ={perestab1["emp3_perestab_qcew_min_cbp"].mean()}; median {perestab1["emp3_qcew_min_cbp"].median()} per estab ={perestab1["emp3_perestab_qcew_min_cbp"].median()}')
-    #     print(f'mean qcew-cbp wages={perestab1["wages_qcew_min_cbp"].mean()} per estab ={perestab1["wages_perestab_qcew_min_cbp"].mean()}; median {perestab1["wages_qcew_min_cbp"].median()} per estab ={perestab1["wages_perestab_qcew_min_cbp"].median()}')
-    # tempexcluded = melddf.loc[melddf['industry'].isin(excluded_cbp),]
-    # tempexcluded['qcewNotNA'] = tempexcluded['emp3_qcew'].notna().values
-    # tempexcluded['estnumNotNA'] = tempexcluded['estnum_qcew'] * tempexcluded['qcewNotNA'].astype(float)
-    # tempgroup = tempexcluded[
-    #     ['agglvl_code', 'qcewNotNA', 'industry', 'estnum_qcew', 'estnumNotNA', 'geoindkey','geography' ]].groupby('agglvl_code')
-    # print(pd.DataFrame({'qcew_noNA': tempgroup['qcewNotNA'].sum(),
-    #                     'p_noNA': (tempgroup['qcewNotNA'].sum() / tempgroup['geoindkey'].nunique()).round(2),
-    #                     'estnum': tempgroup['estnum_qcew'].sum(),
-    #                     'estnum_noNA':tempgroup['estnumNotNA'].sum(),
-    #                     'p_estnum_noNA': (tempgroup['estnumNotNA'].sum() / tempgroup['estnum_qcew'].sum()).round(2),
-    #                     'nexcodes': tempgroup['industry'].nunique()}))
-    # cbponly=melddf.loc[(melddf['row_sources']=="cbp_only")&(melddf['agglvl_code'].isin([78,77,76])),['geoindkey','state','industry','emp3_cbp','wages_cbp','estnum_cbp','agglvl_code','geography']]
-    # #print(pd.crosstab(cbponly['agglvl_code'],cbponly['state']))
-    # #print(pd.crosstab(cbponly['agglvl_code'],cbponly['industry'].str.slice(stop=-3)))
-    # #print(cbponly.describe())
-    # industry_cbponly=cbponly['industry']
-    # print('industry levels in cbp only that appear in non-cbp rows')
-    # #print((melddf.loc[(melddf['industry'].isin(industry_cbponly)),'row_sources']=="cbp_only").value_counts())
-    # #print((melddf.loc[(melddf['geography'].isin(cbponly['geography'])), 'row_sources']=="cbp_only").value_counts())
-    # #print('agglvls in cbp only with >5 estnum')
-    # #print(cbponly.loc[cbponly['estnum_cbp']>5,'agglvl_code'].value_counts())
-    # #print(cbponly.loc[cbponly['estnum_cbp']>5,].head())
-    #
-    # #tempdf=melddf
-    # #tempdf['cbp_min_qcew_estnum']=tempdf['estnum_cbp']-tempdf['estnum_qcew']
-    # #for agglvl in [78,77,76,75,74,71]:
-    # #    print(f'agglvl={agglvl}\n{tempdf.loc[tempdf["agglvl_code"]==agglvl,"cbp_min_qcew_estnum"].describe()}')
-    #
+
+    if only_cbp_codes:
+        for exclude_code in [str(excode) for excode in excluded_cbp]:
+            exclude_code = exclude_code.replace("-", "").replace("/", "")
+            melddf=melddf.loc[~melddf["industry"].astype(str).str.startswith(exclude_code),:]
+
+    return(melddf)
+
+## Combine QWi and CBP Data
+# INPUTS:
+#       rawfile: str for file path of raw cbp county data
+#       imputedfile: str for file path of imputed cbp data
+#       qwifolder: str for folder path of folder that includes qwi files with county-level names including "co"
+#       printdiagnostics: logical, if True print shapes of CBP and QWI data and count row in imputed CBP not in QWI
+#       year is the year of the data,
+#       notsuppressedqwi is code for not suppressed data in qwi file, suppressedqwi is code for suppressed data in qwi
+#       only_cbp_codes removes codes that are not included in cbp data
+#       naicsdf is dataframe about naics codes
+#       preprocessConfig, generalConfig, and quarterConfig are configurations from config file used for this process.
+#               If quarterConfig=None, defaults are used.
+# OUTPUTS: pd.dataframe of combined CBP, QCEW, and QWI
+def preadjustments_combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1,suppressedqwi=5,only_cbp_codes=True,naicsdf=None):
+    ## Processing states to be used in combined file from generalConfig input
+    state_abbr = {
+        "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
+        "11": "dc", "12": "fl", "13": "ga", "15": "hi", "16": "id", "17": "il", "18": "in", "19": "ia", "20": "ks",
+        "21": "ky", "22": "la", "23": "me", "24": "md", "25": "ma", "26": "mi", "27": "mn", "28": "ms", "29": "mo",
+        "30": "mt", "31": "ne", "32": "nv", "33": "nh", "34": "nj", "35": "nm", "36": "ny", "37": "nc", "38": "nd",
+        "39": "oh", "40": "ok", "41": "or", "42": "pa", "44": "ri", "45": "sc", "46": "sd", "47": "tn", "48": "tx",
+        "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
+    }
+    allowedstates=state_abbr.keys()
+    if "STATES" in generalConfig:
+        if generalConfig["STATES"] is None or "ALL" in generalConfig['STATES']:
+            pass
+        else:
+            fipscodes_df=pd.read_csv(generalConfig['FIPS_STATE_FILE'])
+            states=generalConfig["STATES"]
+            fipscode = fipscodes_df.iloc[:, 0].astype(str).str.upper()  # standardize format col1
+            stateselect = (fipscode.isin(states))  # initialize the logical to select states
+            if len(fipscodes_df.columns) > 1:  # if there are more than 1 column
+                for colname in fipscodes_df.columns:  # iterate columns to create logical
+                    fipscode = fipscodes_df[colname].astype(str).str.upper()
+                    stateselect = (stateselect) | (fipscode.isin(states))
+            subfips=fipscodes_df[stateselect]
+            allowedstates = subfips.iloc[:,0].values  # subset
+    #onlyraw=False
+
+    #indicator if we are saving diagnostics
+    if diagnosticsfile is not None:
+        printdiagnostics=True
+    else:
+        printdiagnostics=False
+
+    #read qwi data, subset to desired states
+    if not os.path.exists(qwifolder):
+        raise Exception(f"Cannot locate directory named {qwifolder} ")
+
+    qwi = read_qwi_co(qwifolder,generalConfig)  # read all qwi county files
+    qwi=qwi.loc[qwi['state'].astype(str).isin([str(st) for st in allowedstates]),:].copy()
+
+    #change suppressed cells to NA
+    flagCols = ["semp1_qwi", "semp3_qwi", "sEmpS", "sEarnBeg"]
+    iter=0
+    qwi['agglvl']=qwi['agglvl_code'].astype(str)+"_lvl"
+    for fcol in flagCols:
+        iter=iter+1
+        qwi.loc[qwi[fcol].astype(float)==suppressedqwi,fcol[1:]]=np.nan
+        if printdiagnostics: #getting suppression counts by variable
+            fcolname = fcol.replace("_qwi", "")
+            fcolname = fcolname[1:]
+            tempxtab = pd.crosstab(qwi['agglvl'], qwi[fcol]).join(
+                pd.crosstab(qwi['agglvl'], qwi[fcol], normalize="index"),
+                on="agglvl", how='outer', lsuffix='_count', rsuffix='_prop', sort=True)
+            countsup = tempxtab[str(suppressedqwi)+"_count"]
+            pctsup = tempxtab[str(suppressedqwi)+"_prop"]
+            if iter == 1:
+                xtab = pd.DataFrame({'n_cells': tempxtab[[str(x)+"_count" for x in [notsuppressedqwi,suppressedqwi]]].sum(axis=1),
+                                     "" + fcolname: countsup,
+                                     "%" + fcolname: pctsup.multiply(100).round(0)},
+                                    index=tempxtab.index)
+                xtabQWI = xtab
+            else:
+                xtab = pd.DataFrame(
+                    {"" + fcolname: countsup,
+                     "%" + fcolname: pctsup.multiply(100).round(0)},
+                    index=tempxtab.index)
+                xtabQWI = xtabQWI.join(xtab, on="agglvl", how="outer", lsuffix="", rsuffix="_" + fcolname)
+    qwi.drop(columns="agglvl",inplace=True,errors="ignore")
+
+    # reading in raw cbp data
+    if not os.path.isfile(rawfile):
+        raise Exception(f"Cannot locate file named {rawfile} ")
+    else:
+        raw = pd.read_table(rawfile, sep=",")  # read raw CBP file for counties in 50 states
+    #reading in imputed cbp data
+    if not os.path.isfile(imputedfile):
+        if float(year)<2017:
+            raise Exception(f"Cannot locate file named {imputedfile} ")
+        else:
+            imputeCBP=None
+            onlyraw=True
+    else:
+        onlyraw=False
+        imputeCBP = preprocess_imputedCBP_file(imputedfile)  # read imputed data file (only includes Mid March Employment)
+
+    # combine imputted and raw
+    if printdiagnostics:
+        cbp, supptabCBP = combine_CBP_raw_imputed(raw,imputeCBP,generalConfig=generalConfig,onlyraw=onlyraw,supptab=printdiagnostics)
+    else:
+        cbp = combine_CBP_raw_imputed(raw,imputeCBP,generalConfig=generalConfig,onlyraw=onlyraw)
+
+
+    #cbp=cbp.loc[cbp['state'].isin(allowedstates),:]
+    if generalConfig['QTR']==4 and str(int(str(generalConfig['YEAR'])[2:])+1) in rawfile:
+        cbp['year_qtr_cbp']=float(generalConfig['YEAR'])+1.25
+    else:
+        cbp['year_qtr_cbp'] = float(generalConfig['YEAR']) + 0.25
+
+    #combine QWI and CBP
+    cbp["state"] = cbp["state"].astype(int).astype(str)
+    cbp["cnty"] = cbp["cnty"].astype(int).astype(str).str.zfill(3)
+    qwi["state"] = qwi["state"].astype(int).astype(str)
+    qwi["cnty"] = qwi["cnty"].astype(int).astype(str).str.zfill(3)
+    qwi["ind_level"] = qwi["ind_level"].astype(int).astype(str)
+    combinedf = cbp.merge(qwi,how="outer",on=np.intersect1d(np.array(qwi.columns.values),np.array(cbp.columns.values)).tolist(),indicator=True,suffixes=["_cbp","_qwi"],validate="one_to_one")
+
+    combinedf.reset_index(drop=True,inplace=True)
+    cbp.reset_index(drop=True,inplace=True)
+
+    ## Getting diagnostic information
+    cbpidx=cbp['agglvl_code'].isin(qwi['agglvl_code'].unique())#pd.Series([False]*len(cbp))
+    combineidx=combinedf['agglvl_code'].isin(qwi['agglvl_code'])
+
+    qwilevels=qwi['agglvl_code'].astype(str).unique()
+    restrictions_str="Restricted to common aggregate levels ("+', '.join(qwilevels)+")"
+
+    misscount2 = sum(combinedf.loc[combineidx,'_merge'] == "left_only")
+    misscount1 = sum(combinedf['_merge'] == "right_only")
+    misscount4 = sum(combinedf['_merge_rawimpute'] == "raw_only")
+    #possible diagnostics
+    if not os.path.exists(outfilepath):
+        os.mkdir(outfilepath)
+    if printdiagnostics:
+        cbp=cbp.reset_index(drop=True)
+        misscount2_prop=0
+        misscount1_prop=0
+        if misscount2>0 and cbp[cbpidx].shape[0]>0:
+            misscount2_prop=round((misscount2/cbp[cbpidx].shape[0])*100)
+        if misscount1>0 and qwi.shape[0]>0:
+            misscount1_prop=round((misscount1/qwi.shape[0])*100)
+        with open(outfilepath+diagnosticsfile,'w') as f:
+            os.makedirs(os.path.dirname(outfilepath), exist_ok=True)
+            print("Number of rows,columns in combined CBP: ",cbp.shape,file=f)
+            print("Number of rows,columns in QWI: ", qwi.shape, file=f)
+            print("Number of rows in CBP but not QWI "+restrictions_str+": "+str(misscount2)+"("+str(misscount2_prop)+"%)", file=f)
+            print("Number of rows in QWI but not combined CBP: "+str(misscount1)+"("+str(misscount1_prop)+"%)", file=f)
+            print("Number of rows in raw CBP but not imputed CBP: ", misscount4, file=f)
+            print("--"*20,file=f)
+            print("------- CBP Suppression Table -------",file=f)
+            print("--"*20,file=f)
+        write_pipe_table(df=supptabCBP, filename=outfilepath+diagnosticsfile,include_index=False)
+
+        #supptabCBP.to_csv(outfilepath+diagnosticsfile,sep=",",mode='a',index=False)
+        with open(outfilepath + diagnosticsfile, 'a') as f:
+            print("--" * 20, file=f)
+            print("----- QWI Suppression Table -----", file=f)
+            print("--" * 20, file=f)
+        write_pipe_table(df=xtabQWI.T, filename=outfilepath+diagnosticsfile,include_index=True)
+
+        #xtabQWI.to_csv(outfilepath+diagnosticsfile,sep=",",mode="a")
+
+    combinedf = combinedf.drop(columns=['_merge','_merge_rawimpute'])
+    #combinedf=fill_from_geoindkey(combinedf)
+    combinedf['year']=generalConfig["YEAR"]
+
+    #fill when lb and ub
+    if "lb" in combinedf.columns and combinedf['emp3_cbp'].isna().sum()>0:
+        combinedf.loc[combinedf['emp3_cbp'].isna(),"emp3_cbp"]=combinedf.loc[combinedf['emp3_cbp'].isna(),:].apply(random_midpoint,axis=1)
+
+    #rename columns
+    combinedf.rename(columns={"EmpS": "lwbd_emp_qwi",
+                              "sEmpS": "lwbd_emp_qwi_flag",
+                              "semp1_qwi": "emp1_qwi_flag",
+                              "semp3_qwi":"emp3_qwi_flag",
+                              "EarnBeg":"avg_month_emp_wages",
+                              "sEarnBeg":"avg_month_emp_wages_flag"}, inplace=True)
+    #scale CBP wages to match QWI (avg_month_emp_wages) and QCEW (if applicable)
+    combinedf['wages_cbp']=combinedf['wages_cbp']*1000
+
+    ## IF QCEW not available
+    if "QCEWDIR" not in preprocessConfig or preprocessConfig["QCEWDIR"] is None:
+        combinedf = fill_from_geoindkey(combinedf,naics_xwalk=generalConfig['BLS_NAICS_CROSSWALK'])
+        combinedf=combinedf[combinedf['estnum'].notna()]
+        combinedf['cnty'] = combinedf['cnty'].astype(str)
+        combinedf['ind_level'] = combinedf['ind_level'].astype(str)
+        if generalConfig['QTR'] != 1:
+            print("Adjusting the values of CBP to match quarter " + str(generalConfig["QTR"]))
+            combinedf = quarter_source_adjustment(combinedf, generalConfig, "wages", quarterConfig=quarterConfig,
+                                               adjust_source=False, rseed=rseed)
+        ## Adjust values
+        combinedf["wages"]=combinedf['wages_cbp']
+        combinedf["wages_source"]="cbp"
+        combinedf.loc[combinedf["wages"].isna(),"wages_source"]=""
+        for vname in ["emp1", "emp3"]:
+            combinedf[vname] = combinedf[vname + "_qwi"]
+            combinedf[vname + "_source"] = ""
+            combinedf.loc[~combinedf[vname].isna(), vname + "_source"] = "qwi"
+        print("When QWI emp3 is not available, use CBP.")
+        combinedf = quarter_source_adjustment(combinedf, generalConfig, "emp3", quarterConfig=None,
+                                       formula="emp3~emp3_cbp-1",
+                                       adjust_source=True, source="CBP", rseed=rseed)
+
+        if outfilepath in outfilename:
+            combinedf.to_csv(outfilename)
+        else:
+            combinedf.to_csv(outfilepath + outfilename)
+        fullcombine=combinedf.copy()
+
+    else: #if there is qcew data
+        combinedf.rename(columns={"estnum": "estnum_cbp"}, inplace=True)
+        combinedf['cnty'] = combinedf['cnty'].astype(str)
+        combinedf['ind_level'] = combinedf['ind_level'].astype(str)
+
+        #read qcew
+        qcew = pd.read_csv(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig["QCEWDIR"] + "qcew_part.csv")
+        fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig,quarterConfig,naicsdf=naicsdf,only_cbp_codes=only_cbp_codes)
+
+        #fullcombine=fullcombine[fullcombine['estnum_cbp'].notna()].copy()
+        if outfilename is None:
+            print(f'Not saving combined data to a csv. No filepath provided.')
+        elif outfilepath is not None:
+            if outfilepath in outfilename:
+                fullcombine.to_csv(outfilename)
+            else:
+                fullcombine.to_csv(outfilepath + outfilename)
+        else:
+            fullcombine.to_csv(outfilename)
+    return(fullcombine)
+
+## Combine QWi and CBP Data
+# INPUTS:
+#       rawfile: str for file path of raw cbp county data
+#       imputedfile: str for file path of imputed cbp data
+#       qwifolder: str for folder path of folder that includes qwi files with county-level names including "co"
+#       printdiagnostics: logical, if True print shapes of CBP and QWI data and count row in imputed CBP not in QWI
+#       year is the year of the data,
+#       notsuppressedqwi is code for not suppressed data in qwi file, suppressedqwi is code for suppressed data in qwi
+#       only_cbp_codes removes codes that are not included in cbp data
+#       naicsdf is dataframe about naics codes
+#       preprocessConfig, generalConfig, and quarterConfig are configurations from config file used for this process.
+#               If quarterConfig=None, defaults are used.
+# OUTPUTS: pd.dataframe of combined CBP, QCEW, and QWI
+def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1,suppressedqwi=5,only_cbp_codes=True,naicsdf=None):
+    df=preadjustments_combine_qwi_cbp_qcew(rawfile, imputedfile, qwifolder, generalConfig, preprocessConfig,
+                                        quarterConfig=quarterConfig, outfilename=None, diagnosticsfile=diagnosticsfile,
+                                        outfilepath=outfilepath, year=year, notsuppressedqwi=notsuppressedqwi,
+                                        suppressedqwi=suppressedqwi, only_cbp_codes=only_cbp_codes, naicsdf=naicsdf)
+    fullcombine=combined_adjustments(df=df, generalConfig=generalConfig, quarterConfig=quarterConfig, rseed=None, adjustforsource_estnum=True, naicsdf=naicsdf,
+                         base_data="cbp")
+    if outfilename is None:
+        print(f'Not saving combined data to a csv. No filepath provided.')
+    elif outfilepath is not None:
+        if outfilepath in outfilename:
+            fullcombine.to_csv(outfilename)
+        else:
+            fullcombine.to_csv(outfilepath + outfilename)
+    else:
+        fullcombine.to_csv(outfilename)
+    return(fullcombine)
+
+
+
+def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustforsource_estnum=True,naicsdf=None,base_data="cbp"):
+    melddf=df.copy()
 
     if generalConfig['QTR']!=1:
         print("Adjusting the values of CBP to match quarter "+str(generalConfig["QTR"]))
         melddf = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=quarterConfig,
                                        adjust_source=False, rseed=rseed)
+
+    if base_data == "cbp":
+        melddf['estnum'] = melddf["estnum_cbp"]
+        melddf.loc[melddf["estnum"].notna(),'estnum_source'] = "cbp"
+        print(pd.crosstab(melddf["estnum_source"], melddf["agglvl_code"], dropna=False))
+
+        melddf = melddf.loc[melddf['estnum'].notna(),].copy()
+    elif base_data == "qcew":
+        melddf['estnum'] = melddf["estnum_qcew"]
+        melddf.loc[melddf["estnum"].notna(),'estnum_source'] = "qcew"
+        melddf = melddf.loc[melddf['estnum'].notna(),].copy()
+    melddf = melddf.loc[melddf['row_sources'] != "qwi_only", :]
+
+
     ## Adjust values
     #print("Using QCEW when available...")
     for vname in ["estnum", "emp3", "emp2", "emp1", "wages"]:
-        melddf[vname] = melddf[vname + "_qcew"]
-        melddf[vname + "_source"] = ""
-        melddf.loc[~melddf[vname].isna(), vname + "_source"] = "qcew"
+        if base_data=="cbp" and vname=="estnum":
+            pass
+        else:
+            melddf[vname] = melddf[vname + "_qcew"]
+            melddf[vname + "_source"] = ""
+            melddf.loc[~melddf[vname].isna(), vname + "_source"] = "qcew"
+
     if adjustforsource_estnum and adjustforsource_regression:
         print("Cannot use regression and average per establishment adjustments together. Defaults to regression adjustment.")
+
+    ## Use regression to adjust for the source
     if adjustforsource_regression:
-        #print("When QCEW wages are not available, use CBP.")
         df = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=None,
                                    formula="wages~wages_cbp+np.log(estnum_cbp)+np.log(estnum_qcew)",
                                    adjust_source=True, source="CBP", rseed=rseed)
@@ -829,12 +823,12 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
             df = quarter_source_adjustment(df, generalConfig, "emp1", quarterConfig=None,
                                        formula="emp1~emp1_qwi+np.log(estnum_qcew)",
                                        adjust_source=True, source="QWI", rseed=rseed)
-    elif adjustforsource_estnum:
+    elif adjustforsource_estnum: #use average value per establishment to adjust for source
         cbpavail = melddf["wages_cbp"].notna()
         noqcewwages = melddf['wages'].isna()
-        melddf = melddf.loc[melddf['row_sources'] != "qwi_only", :]
-        ## Adjust values
+
         df = melddf.copy()
+        ## Adjust values
         for vname in ["emp3","wages"]:
             df[vname+"_perestnum_cbp"]=df[vname+"_cbp"]/df["estnum_cbp"]
             df[vname+"_perestnum_qcew"]=df[vname+"_qcew"]/df["estnum_qcew"]
@@ -849,11 +843,14 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
         #print("When QCEW wages are not available, use CBP.")
         df.loc[(cbpavail) & (noqcewwages), "wages_source"] = "cbp"
         df.loc[(cbpavail) & (noqcewwages), "wages_perestnum"] = df.loc[(cbpavail) & (noqcewwages), "wages_perestnum_cbp"]
-        df.loc[(cbpavail) & (noqcewwages), 'estnum'] = df.loc[(cbpavail) & (noqcewwages), "estnum_cbp"]
-        df.loc[(cbpavail) & (noqcewwages), 'estnum_source'] = "cbp"
+        #get estnum based on availiability
+        if base_data not in ["cbp","qcew"]:
+            df.loc[(cbpavail) & (noqcewwages), 'estnum'] = df.loc[(cbpavail) & (noqcewwages), "estnum_cbp"]
+            df.loc[(cbpavail) & (noqcewwages), 'estnum_source'] = "cbp"
 
-        df.loc[(df["estnum_qcew"].isna())&((df["estnum_cbp"].notna())),"estnum"]= df.loc[(df["estnum_qcew"].isna())&((df["estnum_cbp"].notna())),"estnum_cbp"]
-        df.loc[(df["estnum_qcew"].isna())&((df["estnum_cbp"].notna())),"estnum_source"]= "cbp"
+            df.loc[df["row_sources"].isin(["all_but_qcew","cbp_only"]),"estnum"]= df.loc[df["row_sources"].isin(["all_but_qcew","cbp_only"]),"estnum_cbp"]
+            df.loc[df["row_sources"].isin(["all_but_qcew","cbp_only"]),"estnum_source"]= "cbp"
+
         for source in ["QWI", "CBP"]:
             # havepredictor_noresponse=df[(~df.loc[:,"emp3_"+source.lower()].isna())&(df['emp3'].isna()),:]
             if sum((~df.loc[:, "emp3_" + source.lower()].isna()) & (df['emp3'].isna())) > 0:
@@ -867,9 +864,8 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
             df.loc[(sourceavail) & (df['emp1'].isna()), "emp1_source"] = "qwi"
         df['year_qtr'] = df['year'].astype(float) + (df["qtr"].astype(float) / 4)
 
-        df=avgestnum_source_adjustment(df.loc[df['emp3_perestnum'].notna(),:],keep_only_filled_emp3=keep_only_emp3_filled)
-    else:
-        #print("When QCEW wages are not available, use CBP.")
+        df=avgestnum_source_adjustment(df.loc[df['emp3_perestnum'].notna(),:],keep_only_filled_emp3=keep_only_emp3_filled,naicsdf=naicsdf)
+    else: #no adjustments...
         cbpavail=melddf["wages_cbp"].notna()
         noqcewwages=melddf['wages'].isna()
         df=melddf.copy()
@@ -893,9 +889,7 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
             df.loc[(cbpavail) & (df['emp1'].isna()), "emp1_source"] = "qwi"
         df['year_qtr']=df['year'].astype(float)+(df["qtr"].astype(float)/4)
 
-
-    return(df)
-
+    return df
 
 
 
@@ -906,8 +900,8 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
 # preprocessConfig = config['preprocessConfig']
 # generalConfig = config['generalConfig']
 # foldername = preprocessConfig['DATA_IN_FOLDER']
-#
-# ##generalConfig["QCEWDIR"]=None
+# #
+# # ##generalConfig["QCEWDIR"]=None
 # df=combine_qwi_cbp_qcew(rawfile=foldername + preprocessConfig['CBPDATA'],
 #                    imputedfile=foldername + preprocessConfig['IMPUTECBP'],
 #                    qwifolder=foldername + preprocessConfig['QWIDIR'],
@@ -917,6 +911,9 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
 #                    diagnosticsfile=None,
 #                    outfilepath = preprocessConfig['OUTPATH'],
 #                 year=generalConfig['YEAR'])
+#
+# print(df.head())
+# print(pd.crosstab(df["estnum_source"],df["agglvl_code"]))
 #
 # #####  Checking the scale is the same across data sources for employment counts and wages
 #df['wages_approx_qwi']=df['emp3_qwi']*3*df['avg_month_emp_wages']

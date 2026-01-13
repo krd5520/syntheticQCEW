@@ -352,7 +352,11 @@ def subset_model_data(data,formula_str):
             pass
             #if data[cvar].astype(str).str.isnumeric().any():
             #    data[cvar]=data[cvar].astype(float)
-    data=data[list(checkvars)].copy()
+    print(list(checkvars))
+    print(data.columns)
+    print(data.shape[0])
+    data=data.loc[:,list(checkvars)].copy()
+    print(data.head())
     return data[data.notna().all(axis=1)]
 
 
@@ -388,8 +392,10 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicol
     # Retrieve OLS formula from config.yaml
     formula=formula_str
     Config={'COOKS_THRESH':cooks_thresh,'OUTLIER_THRESH':studentresid_thresh,'DIAGNOSTIC_PLOTS':diagnostic_plots}
+    print("data head before subset")
+    print(data.head())
     subdf = subset_model_data(data,formula_str)
-
+    print(subdf.head())
     # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
     # and perform initial model fitting
 

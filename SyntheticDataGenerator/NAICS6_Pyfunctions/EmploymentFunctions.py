@@ -50,11 +50,19 @@ def get_m1emp_model(df,employmentConfig):
         diagplots=employmentConfig['DIAGNOSTIC_PLOTS']
     else:
         diagplots=None
+
     if "emp1diff" in employmentConfig['OLS_FORMULA']:
+        print(df[["agglvl_code","emp1diff","emp1_missing6by4"]].head())
+        print(df.describe())
         modeldf=df.loc[(df['emp1_missing6by4']>0),:]
         #modeldf=modeldf.loc[(modeldf['emp1diff']>0)&(modeldf['emp3']>=0),:]
     else:
         modeldf=df
+    print(employmentConfig['OLS_FORMULA'])
+    print(modeldf.columns)
+    print("modeldf head")
+    print(modeldf.head())
+    print(f"num na emp3 {modeldf['emp3'].isna().sum()} modeldf shape {modeldf.shape[0]}")
     model = get_model(modeldf,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
     print(model.summary())
     # end. return fitted model.

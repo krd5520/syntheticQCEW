@@ -8,6 +8,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
+
+from typing import Dict, List, Tuple, Optional
+
 sys.path.append(os.path.abspath('./'))
 from GeneralFunctions import custom_predict
 from hierarchy_geoindkey import *
@@ -17,13 +20,19 @@ from hierarchy_geoindkey import *
 #     employmentConfig = config['employmentConfig']
 pd.set_option('mode.chained_assignment', None)
 
-printheads=False #for testing in development
+printheads = False  # for testing in development
 ## Hard-coded, NAICS codes which CBP does not include in its data.
-excluded_cbp_naics6=["525110", "525120","525190","525920","541120"]
-hardcode_cbp_flags=pd.DataFrame({'flag':["G","H","J"],'min_noise_percent':[0.0,0.02,0.05],'max_noise_percent':[0.02,0.05,np.nan]})
+excluded_cbp_naics6 = ["525110", "525120", "525190", "525920", "541120"]
+excluded_cbp = ["92----", "111///", "112///", "482///", "491///", "814///", "525110", "525120", "525190", "525920",
+                "541120"]
 
-def excluded_cbp_adjustments(df,excluded_cbp):
+hardcode_cbp_flags = pd.DataFrame(
+    {'flag': ["G", "H", "J"], 'min_noise_percent': [0.0, 0.02, 0.05], 'max_noise_percent': [0.02, 0.05, np.nan]})
+
+
+def excluded_cbp_adjustments(df, excluded_cbp):
     return df
+
 
 def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None, formula=None, adjust_source=True,
                               source="CBP", rseed=None):
@@ -152,13 +161,14 @@ def get_varmin(codes4naics, fulldf, variable="emp1"):
     tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable)
     # Create minwage column (0 if no data available)
     tomerge6dig['min' + variable] = np.where(tomerge6dig[variable + '_sum6by4'].isna(), 0,
-                                                  tomerge6dig[variable + '_sum6by4'])
+                                             tomerge6dig[variable + '_sum6by4'])
     tomerge6dig['geoindkey'] = tomerge6dig['geo4naics'].astype(str) + "//"
     tomerge6dig = tomerge6dig[['geoindkey', 'min' + variable]]
     return tomerge6dig
 
 
-def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="emp1",fulldf=None,onlyqcew=True,minonly=True):
+def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="emp1", fulldf=None, onlyqcew=True,
+                               minonly=True):
     '''
     What is the point?
         adjust_geo4naics_varvalues() constrains wage/emp estimates to stay within min/max bounds
@@ -176,17 +186,17 @@ def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="em
     if dfmaxmin is None:
         fulldf['geo4naics'] = fulldf['geoindkey'].str.slice(stop=-2)
         df4 = fulldf[fulldf['agglvl_code'] == 76].copy()
-        dfmaxmin = get_varmaxmindf(df4dig=df4, fulldf=fulldf, variable=variable,onlyqcew=onlyqcew)
+        dfmaxmin = get_varmaxmindf(df4dig=df4, fulldf=fulldf, variable=variable, onlyqcew=onlyqcew)
     if 'geo4naics' not in fitdf.columns:
         fitdf['geo4naics'] = fitdf['geoindkey'].str.slice(stop=-2)
     maxmindf = dfmaxmin[['geo4naics', 'min' + variable, 'max' + variable,
                          "max" + variable + "_source"]].copy()
 
-    #maxmindf = dfmaxmin[['geo4naics', 'min' + variable, 'max' + variable,'max'+variable+'_qcewsource',"max"+variable+"_source"]].copy()
+    # maxmindf = dfmaxmin[['geo4naics', 'min' + variable, 'max' + variable,'max'+variable+'_qcewsource',"max"+variable+"_source"]].copy()
     fitdf = fitdf.merge(maxmindf, on='geo4naics', how='left')
-    fitdf['min'+variable+'_source'] = 'hierarchy'
-    fitdf.loc[fitdf['min'+variable]==0,'min'+variable+'_source'] = 'structural'
-    #if stabvals is not None and "emp" in variable:
+    fitdf['min' + variable + '_source'] = 'hierarchy'
+    fitdf.loc[fitdf['min' + variable] == 0, 'min' + variable + '_source'] = 'structural'
+    # if stabvals is not None and "emp" in variable:
     #    fitdf.loc[:, "min" + variable] = np.fmin(fitdf["min" + variable].to_numpy(), stabvals.to_numpy())
     #    fitdf.loc[fitdf['min'+variable]==stabvals,'min_source']="stable_emp"
 
@@ -197,27 +207,32 @@ def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="em
         fitdf.loc[(fitdf[variable] > fitdf['max' + variable]), 'value_status'] = "above calculated max"
         print(
             f'When adjusting {variable}: \n{pd.crosstab(fitdf["value_status"], fitdf[variable + "_source"], dropna=False)}')
-        abovedf=fitdf.loc[(fitdf["value_status"] == "above calculated max"), [variable + "_source",
-                                                                      "max" + variable + "_qcewsource","max"+variable+"_source"]].groupby(
-            [variable + "_source","max"+variable+"_source"]).describe()
+        abovedf = fitdf.loc[(fitdf["value_status"] == "above calculated max"), [variable + "_source",
+                                                                                "max" + variable + "_qcewsource",
+                                                                                "max" + variable + "_source"]].groupby(
+            [variable + "_source", "max" + variable + "_source"]).describe()
         print(f'Above Calculated Max prop from qcew:\n {abovedf}')
-        abovedf=fitdf.loc[(fitdf["value_status"] == "above calculated max"), [variable + "_source","max"+variable+"_source"]]
-        print(f'Above Calculated Max prop from qcew:\n {pd.crosstab(abovedf[variable+"_source"],abovedf["max"+variable+"_source"])}')
+        abovedf = fitdf.loc[
+            (fitdf["value_status"] == "above calculated max"), [variable + "_source", "max" + variable + "_source"]]
+        print(
+            f'Above Calculated Max prop from qcew:\n {pd.crosstab(abovedf[variable + "_source"], abovedf["max" + variable + "_source"])}')
         fitdf.drop(columns="value_status", inplace=True)
-        print(f'Check Maxes\n{fitdf.loc[fitdf["max"+variable].notna(),[variable,variable+"_source","min"+variable,"max"+variable]].head()}')
+        print(
+            f'Check Maxes\n{fitdf.loc[fitdf["max" + variable].notna(), [variable, variable + "_source", "min" + variable, "max" + variable]].head()}')
 
     # Apply constraints
     if minonly:
-        fitdf[variable]=fitdf[variable].clip(lower=fitdf['min'+variable].astype(float))
+        fitdf[variable] = fitdf[variable].clip(lower=fitdf['min' + variable].astype(float))
     else:
         fitdf[variable] = fitdf[variable].clip(
             lower=fitdf['min' + variable].astype(float),
             upper=fitdf['max' + variable].astype(float)
         )
-    #fixed=fitdf.loc[below_min_notqcew.index.values,[variable,variable+"_source",'min'+variable,'max'+variable,'min_source']]
-    #print(f'Fixed bounds?\n{fixed.head()}')
-    #fitdf = fitdf.drop(columns=['min' + variable, 'max' + variable,'min_source'])
+    # fixed=fitdf.loc[below_min_notqcew.index.values,[variable,variable+"_source",'min'+variable,'max'+variable,'min_source']]
+    # print(f'Fixed bounds?\n{fixed.head()}')
+    # fitdf = fitdf.drop(columns=['min' + variable, 'max' + variable,'min_source'])
     return fitdf
+
 
 def get_varmax(codes4naics, fulldf, variable="emp1"):
     '''
@@ -235,7 +250,7 @@ def get_varmax(codes4naics, fulldf, variable="emp1"):
     # Initialize the output dataframe
     outdf = pd.DataFrame({
         "geoindkey": codes4naics,
-        "max"+variable: np.nan,
+        "max" + variable: np.nan,
         "geo3naics": codes4naics.str[:-3],
         "geo2naics": codes4naics.str[:-4],
         "geography": codes4naics.str[:-7]
@@ -247,8 +262,9 @@ def get_varmax(codes4naics, fulldf, variable="emp1"):
     ].copy()
     tomergedf3["geo3naics"] = tomergedf3["geoindkey"].str.slice(stop=-3)
 
-    tomergedf3[variable + "_naics3"] = tomergedf3[variable]#np.where(tomergedf3[variable].notna(), np.nan, tomergedf3[variable])
-    tomergedf3[variable + "_source_naics3"] = tomergedf3[variable+"_source"]
+    tomergedf3[variable + "_naics3"] = tomergedf3[
+        variable]  # np.where(tomergedf3[variable].notna(), np.nan, tomergedf3[variable])
+    tomergedf3[variable + "_source_naics3"] = tomergedf3[variable + "_source"]
     tomergedf3 = tomergedf3[["geo3naics", "estnum", variable + "_naics3", variable + "_source_naics3"]]
     # Merge 3-digit data
     outdf = outdf.merge(tomergedf3, on='geo3naics', how='left', suffixes=('', '_naics3'))
@@ -257,64 +273,67 @@ def get_varmax(codes4naics, fulldf, variable="emp1"):
     fulldf['geo2naics'] = fulldf['geoindkey'].str.slice(stop=-4)
     tomergedf2 = fulldf[fulldf['geo2naics'].isin(notmaxcodes) &
                         fulldf['geoindkey'].str.contains(r"_[0-9]{2}[^0-9]{4}")].copy()
-    tomergedf2[variable + '_naics2'] = tomergedf2[variable]#np.where(tomergedf2[variable].notna(), np.nan, tomergedf2[variable])
-    tomergedf2[variable + '_source_naics2'] = tomergedf2[variable+"_source"]
+    tomergedf2[variable + '_naics2'] = tomergedf2[
+        variable]  # np.where(tomergedf2[variable].notna(), np.nan, tomergedf2[variable])
+    tomergedf2[variable + '_source_naics2'] = tomergedf2[variable + "_source"]
     tomergedf2 = tomergedf2[['geo2naics', 'estnum', variable + '_naics2', variable + "_source_naics2"]]
     # Calculate differences between sector and summed 3-digit wages
     tomergedf3[variable + '_naics3'] = tomergedf3[variable + '_naics3'].astype(float)
     tomergedf3['geo2naics'] = tomergedf3['geo3naics'].str[:-1]  # Extract sector codes
     tomergedf3grouped = tomergedf3.groupby('geo2naics', as_index=False).agg(sumvar3=(variable + '_naics3', 'sum'))
 
-    extrainvestigate=False
+    extrainvestigate = False
     if extrainvestigate:
         ## extra investigation
-        tallysource = tomergedf3.groupby(['geo2naics', variable + '_source_naics3'], dropna=False).size().to_frame("count")
-        tallysource['prop']=tallysource['count']/tallysource.groupby(level=0)['count'].transform('sum')
-        tallysource=tallysource.reset_index().pivot_table(
-            index='geo2naics', columns=variable + "_source_naics3", values=["count","prop"],
+        tallysource = tomergedf3.groupby(['geo2naics', variable + '_source_naics3'], dropna=False).size().to_frame(
+            "count")
+        tallysource['prop'] = tallysource['count'] / tallysource.groupby(level=0)['count'].transform('sum')
+        tallysource = tallysource.reset_index().pivot_table(
+            index='geo2naics', columns=variable + "_source_naics3", values=["count", "prop"],
             dropna=False)  # fill_value=0, dropna=False)
         tallysource.columns = tallysource.columns.map(lambda index: f'{variable}_{index[0]}_source_{index[1]}_naics3')
         tallysource = tallysource.reset_index()
-        #print(f'tallysource in tomergedf3 groupby geo2naics head after pivot\n{tallysource.head(10)}')
-        tomergedf3=tomergedf3grouped.merge(tallysource,on='geo2naics',how="left")
+        # print(f'tallysource in tomergedf3 groupby geo2naics head after pivot\n{tallysource.head(10)}')
+        tomergedf3 = tomergedf3grouped.merge(tallysource, on='geo2naics', how="left")
     else:
-        tomergedf3=tomergedf3grouped
+        tomergedf3 = tomergedf3grouped
     tomergedf2 = tomergedf2.merge(tomergedf3, on='geo2naics', how='left')
     tomergedf2['missing_' + variable + '_naics2'] = tomergedf2[variable + '_naics2'].astype(float) - tomergedf2[
         'sumvar3']
-    #print(f"describe missing geo2naics \n{tomergedf3['missing_'+variable+'_naics2'].describe()}")
+    # print(f"describe missing geo2naics \n{tomergedf3['missing_'+variable+'_naics2'].describe()}")
     if extrainvestigate:
-        tomergedf2 = tomergedf2[['geo2naics', 'missing_' + variable + '_naics2', 'estnum', variable + '_naics2',variable+'_source_naics2',variable+'_prop_source_qcew_naics3']]
+        tomergedf2 = tomergedf2[['geo2naics', 'missing_' + variable + '_naics2', 'estnum', variable + '_naics2',
+                                 variable + '_source_naics2', variable + '_prop_source_qcew_naics3']]
     else:
 
-        tomergedf2 = tomergedf2[['geo2naics', 'missing_' + variable + '_naics2', 'estnum', variable + '_naics2',variable+'_source_naics2']]
+        tomergedf2 = tomergedf2[['geo2naics', 'missing_' + variable + '_naics2', 'estnum', variable + '_naics2',
+                                 variable + '_source_naics2']]
     # Merge sector-level data
     outdf = outdf.merge(tomergedf2, on='geo2naics', how='left', suffixes=('', '_naics2'))
-    #print(f'outdf head before getting max \n {outdf.head()}')
+    # print(f'outdf head before getting max \n {outdf.head()}')
     outdf['max' + variable] = outdf.apply(
         lambda row: row[variable + '_naics3'] if pd.notna(row[variable + '_naics3']) else row[
             'missing_' + variable + '_naics2'], axis=1)
     if extrainvestigate:
-        outdf['max'+variable+"_qcewsource"]=outdf[variable+'_prop_source_qcew_naics3']
+        outdf['max' + variable + "_qcewsource"] = outdf[variable + '_prop_source_qcew_naics3']
         outdf.loc[(outdf['max' + variable] == outdf[variable + "_naics3"]) & (
-                    outdf['max' + variable + '_source'] == "qcew"), 'max' + variable + "_qcewsource"] = 1
+                outdf['max' + variable + '_source'] == "qcew"), 'max' + variable + "_qcewsource"] = 1
         outdf.loc[(outdf['max' + variable] == outdf[variable + "_naics3"]) & (
-                    outdf['max' + variable + '_source'] != "qcew"), 'max' + variable + "_qcewsource"] = 0
+                outdf['max' + variable + '_source'] != "qcew"), 'max' + variable + "_qcewsource"] = 0
 
-    outdf['max'+variable+"_source"]=""
-    outdf.loc[outdf['max' + variable]==outdf[variable+"_naics3"],"max"+variable+"_source"]="geo3naics"
-    outdf.loc[outdf['max' + variable]==outdf["missing_"+variable+"_naics2"],"max"+variable+"_source"]="missing_geo2naics"
+    outdf['max' + variable + "_source"] = ""
+    outdf.loc[outdf['max' + variable] == outdf[variable + "_naics3"], "max" + variable + "_source"] = "geo3naics"
+    outdf.loc[outdf['max' + variable] == outdf[
+        "missing_" + variable + "_naics2"], "max" + variable + "_source"] = "missing_geo2naics"
 
-
-
-    #print(f'inside get_varmax, head of outdf after max{variable} added when max{variable} is not na \n {outdf.loc[outdf["max"+variable].notna(),:].head()}')
+    # print(f'inside get_varmax, head of outdf after max{variable} added when max{variable} is not na \n {outdf.loc[outdf["max"+variable].notna(),:].head()}')
     outdf = outdf.drop(columns=[variable + '_naics2'])
     fulldf[variable] = fulldf[variable].astype(float)
     # For remaining missing values, use county-wide totals
     max_allind_allcounty = fulldf[fulldf['agglvl_code'] == 76][variable].max(skipna=True)
-    #print(f'number of maxes from allind_allcounty {outdf["max"+variable].isna().sum()}')
-    if outdf['max'+variable].isna().sum()>0:
-        #print(f'number of maxes from allind_allcounty {outdf["max"+variable].isna().sum()}')
+    # print(f'number of maxes from allind_allcounty {outdf["max"+variable].isna().sum()}')
+    if outdf['max' + variable].isna().sum() > 0:
+        # print(f'number of maxes from allind_allcounty {outdf["max"+variable].isna().sum()}')
         notmaxcodes = outdf[outdf['max' + variable].isna()]['geography'].tolist()
         tomergedfall = fulldf.copy()
         tomergedfall['geography'] = tomergedfall['geoindkey'].str[:-7]
@@ -330,23 +349,26 @@ def get_varmax(codes4naics, fulldf, variable="emp1"):
 
         if extrainvestigate:
             ## extra investigation
-            tallysource = tomergedf2.groupby(['geography', variable + '_source_naics2'], dropna=False).size().to_frame("count")
+            tallysource = tomergedf2.groupby(['geography', variable + '_source_naics2'], dropna=False).size().to_frame(
+                "count")
             tallysource['prop'] = tallysource['count'] / tallysource.groupby(level=0)['count'].transform('sum')
             tallysource = tallysource.reset_index().pivot_table(
                 index='geography', columns=variable + "_source_naics2", values=["count", "prop"],
                 dropna=False)  # fill_value=0, dropna=False)
-            tallysource.columns = tallysource.columns.map(lambda index: f'{variable}_{index[0]}_source_{index[1]}_naics2')
+            tallysource.columns = tallysource.columns.map(
+                lambda index: f'{variable}_{index[0]}_source_{index[1]}_naics2')
             tallysource = tallysource.reset_index()
             # print(f'tallysource in tomergedf3 groupby geo2naics head after pivot\n{tallysource.head(10)}')
             tomergedf2 = tomergedf2group.merge(tallysource, on='geography', how="left")
         else:
-            tomergedf2=tomergedf2group
+            tomergedf2 = tomergedf2group
         tomergedfall = tomergedfall.merge(tomergedf2, on="geography", how="left")
         tomergedfall['missing' + variable + 'all'] = tomergedfall[variable + 'all'].astype(float) - tomergedfall[
             'sum' + variable + '2'].astype(float)
 
         if extrainvestigate:
-            tomergedfall = tomergedfall[['geography', 'missing' + variable + 'all', 'estnum', variable + 'all',variable+'_prop_source_qcew_naics2']]
+            tomergedfall = tomergedfall[['geography', 'missing' + variable + 'all', 'estnum', variable + 'all',
+                                         variable + '_prop_source_qcew_naics2']]
         else:
             tomergedfall = tomergedfall[['geography', 'missing' + variable + 'all', 'estnum', variable + 'all']]
         # Final merge and return
@@ -363,14 +385,14 @@ def get_varmax(codes4naics, fulldf, variable="emp1"):
             "missing" + variable + "all"], "max" + variable + "_source"] = "missing_geography"
 
     if extrainvestigate:
-        outdf = outdf[['geoindkey', 'max' + variable,"max"+variable+"_qcewsource", "max"+variable+"_source"]]
+        outdf = outdf[['geoindkey', 'max' + variable, "max" + variable + "_qcewsource", "max" + variable + "_source"]]
     else:
 
-        outdf = outdf[['geoindkey', 'max' + variable, "max"+variable+"_source"]]
+        outdf = outdf[['geoindkey', 'max' + variable, "max" + variable + "_source"]]
     return outdf
 
 
-def get_varmaxmindf(df4dig, fulldf, variable="emp1",onlyqcew=True):
+def get_varmaxmindf(df4dig, fulldf, variable="emp1", onlyqcew=True):
     '''
     What is the point?
         get_varmaxmindf() combines county by naics4 data with min/max bounds
@@ -383,49 +405,54 @@ def get_varmaxmindf(df4dig, fulldf, variable="emp1",onlyqcew=True):
     # Merge employment data with wage data
 
     # Get min and max wage bounds
-    #print(f'inside get_varmaxmin before get_varmin. columns of fulldf: {fulldf.columns}')
+    # print(f'inside get_varmaxmin before get_varmin. columns of fulldf: {fulldf.columns}')
     if onlyqcew:
-        fulldf=fulldf.loc[fulldf[variable+"_source"]=="qcew",:].copy()
+        fulldf = fulldf.loc[fulldf[variable + "_source"] == "qcew", :].copy()
     mindf = get_varmin(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable)
     maxdf = get_varmax(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable)
     # Merge all data
     df4_maxmin = df4dig.merge(maxdf, on="geoindkey", how="left") \
         .merge(mindf, on="geoindkey", how="left")
-    df4_maxmin['min'+variable] = df4_maxmin['min'+variable].fillna(0)
+    df4_maxmin['min' + variable] = df4_maxmin['min' + variable].fillna(0)
     return df4_maxmin
 
 
-
-def adjust_negative_diff(df4,df,justdrop=True):
+def adjust_negative_diff(df4, df, justdrop=True):
     # get summary of countyXnaics6 cells by countyXnaics4 codes for estnum, wages, and emp3
-    count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum", onlyQCEW=False,include_source=False)
+    count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum", onlyQCEW=False,
+                                  include_source=False)
     df4estnum = df4.merge(count6dig, on=['geo4naics'], how='left', indicator=False, suffixes=["", "_droplater"])
-    df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "_droplater" in dropcol], errors="ignore",inplace=True)
-    for vname in ['wages','emp1','emp2','emp3']:
-        df4estnum[vname+'_perest']=df4estnum[vname]/df4estnum['estnum']
-        #df4estnum['old_'+vname]=df4estnum[vname]
-        df4estnum[vname]=df4estnum[vname+"_perest"]*df4estnum['estnum_sum6by4']
-        df4estnum.drop(columns=[vname+"_perest"],inplace=True)
-    df4estnum['estnum']=df4estnum['estnum_sum6by4']
-    df4estnum.set_index(df4estnum['geoindkey'],inplace=True,drop=True)
-    df.set_index(df['geoindkey'],inplace=True,drop=False)
-    df.loc[df['geoindkey'].isin(df4estnum.index.to_list()),['wages','emp1','emp2','emp3','estnum']]=df4estnum[['wages','emp1','emp2','emp3','estnum']]
-    df.drop(columns=['geoindkey'],inplace=True)
-    df.reset_index(inplace=True,drop=False)
+    df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "_droplater" in dropcol], errors="ignore",
+                   inplace=True)
+    for vname in ['wages', 'emp1', 'emp2', 'emp3']:
+        df4estnum[vname + '_perest'] = df4estnum[vname] / df4estnum['estnum']
+        # df4estnum['old_'+vname]=df4estnum[vname]
+        df4estnum[vname] = df4estnum[vname + "_perest"] * df4estnum['estnum_sum6by4']
+        df4estnum.drop(columns=[vname + "_perest"], inplace=True)
+    df4estnum['estnum'] = df4estnum['estnum_sum6by4']
+    df4estnum.set_index(df4estnum['geoindkey'], inplace=True, drop=True)
+    df.set_index(df['geoindkey'], inplace=True, drop=False)
+    df.loc[df['geoindkey'].isin(df4estnum.index.to_list()), ['wages', 'emp1', 'emp2', 'emp3', 'estnum']] = df4estnum[
+        ['wages', 'emp1', 'emp2', 'emp3', 'estnum']]
+    df.drop(columns=['geoindkey'], inplace=True)
+    df.reset_index(inplace=True, drop=False)
     df4estnum.drop(columns=['geoindkey'], inplace=True)
-    df4estnum.reset_index(inplace=True,drop=False)
-    df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "6by4" in dropcol], errors="ignore",inplace=True)
-    df6=df.loc[df['agglvl_code']==78,:]
-    df6['geo4naics']=df6['geoindkey'].str.slice(stop=-2)
-    df6['geo5naics']=df6['geoindkey'].str.slice(stop=-1)
+    df4estnum.reset_index(inplace=True, drop=False)
+    df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "6by4" in dropcol], errors="ignore",
+                   inplace=True)
+    df6 = df.loc[df['agglvl_code'] == 78, :]
+    df6['geo4naics'] = df6['geoindkey'].str.slice(stop=-2)
+    df6['geo5naics'] = df6['geoindkey'].str.slice(stop=-1)
     df6['geo3naics'] = df6['geoindkey'].str.slice(stop=-3)
 
     count6digwages = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="wages", onlyQCEW=False,
-                                  include_source=True)
-    count6digemp3 = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="emp3", onlyQCEW=False,
                                        include_source=True)
-    df4estnum=df4estnum.merge(count6digwages,on=['geo4naics'], how='left', indicator=True, suffixes=["", "_droplater"])
-    df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "_droplater" in dropcol], errors="ignore",inplace=True)
+    count6digemp3 = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="emp3", onlyQCEW=False,
+                                      include_source=True)
+    df4estnum = df4estnum.merge(count6digwages, on=['geo4naics'], how='left', indicator=True,
+                                suffixes=["", "_droplater"])
+    df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "_droplater" in dropcol], errors="ignore",
+                   inplace=True)
 
     ## Get difference between county by NAICS4 and sum of known county by NAICS6
     df4estnum["wagesdiff"] = df4estnum["wages"].astype(float) - df4estnum['wages_sum6by4'].astype(float)
@@ -434,26 +461,26 @@ def adjust_negative_diff(df4,df,justdrop=True):
 
     ## summarize difference in establishment counts
     ## This showed no cells had more establishments at the countyXnaics6 level than at the countyXnaics4 level
-    #print(f'# countyXnaics4 codes with all establishments accounted for: {df4estnum.loc[df4estnum["estnumdiff"]==0,:].shape[0]}')
-    #print(pd.crosstab(missingestnum['from_cbp_missing_naics6']))
-    #print(f'When There are missing wage values in the countyXnaics6 cells...')
-    #print(f'# countyXnaics4 codes with more establishments at countyXnaics6 than countyXnaics4: {df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"]<0),:].shape[0]}')
-    #print(f'# countyXnaics4 codes with 1-10 establishments NOT accounted for in countyXnaics6: {df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"]>0)&(df4estnum["estnumdiff"]<11),:].shape[0]}')
-    #print(f'# countyXnaics4 codes with >10 establishments NOT accounted for in countyXnaics6: {df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"]>10),:].shape[0]}')
+    # print(f'# countyXnaics4 codes with all establishments accounted for: {df4estnum.loc[df4estnum["estnumdiff"]==0,:].shape[0]}')
+    # print(pd.crosstab(missingestnum['from_cbp_missing_naics6']))
+    # print(f'When There are missing wage values in the countyXnaics6 cells...')
+    # print(f'# countyXnaics4 codes with more establishments at countyXnaics6 than countyXnaics4: {df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"]<0),:].shape[0]}')
+    # print(f'# countyXnaics4 codes with 1-10 establishments NOT accounted for in countyXnaics6: {df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"]>0)&(df4estnum["estnumdiff"]<11),:].shape[0]}')
+    # print(f'# countyXnaics4 codes with >10 establishments NOT accounted for in countyXnaics6: {df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"]>10),:].shape[0]}')
 
-    #print('Rows with greater than 11 establishments missing from countyXnaics6...')
-    #print(df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"] > 11), ['geoindkey','wages_cbp_flag','row_sources','estnum','estnumdiff','wagesdiff','wages_missing6by4','wages_propmissing6by4']])
+    # print('Rows with greater than 11 establishments missing from countyXnaics6...')
+    # print(df4estnum.loc[(df4estnum["wages_missing6by4"]>0)&(df4estnum["estnumdiff"] > 11), ['geoindkey','wages_cbp_flag','row_sources','estnum','estnumdiff','wagesdiff','wages_missing6by4','wages_propmissing6by4']])
 
-    df4['I_emp3_negdiff']=((df4['emp3diff']<0)&(df4['emp3'].notna()))
+    df4['I_emp3_negdiff'] = ((df4['emp3diff'] < 0) & (df4['emp3'].notna()))
     df4['I_wages_negdiff'] = ((df4['wagesdiff'] < 0) & (df4['wages'].notna()))
-    df4['I_both_negdiff']=((df4['emp3diff']<0)&(df4['wagesdiff']<0)&(df4['wages'].notna()))
+    df4['I_both_negdiff'] = ((df4['emp3diff'] < 0) & (df4['wagesdiff'] < 0) & (df4['wages'].notna()))
     print('2-way table of Indicators for emp3 difference is negative and wages difference is negative.')
-    print(pd.crosstab(df4["I_emp3_negdiff"],df4['I_wages_negdiff']))
+    print(pd.crosstab(df4["I_emp3_negdiff"], df4['I_wages_negdiff']))
 
     # Check for countyXnaics4 codes which have no corresponding countyXnaics6 codes
     weirdones = df4.loc[df4["_merge"] == "left_only"]  # only appear in county by NAICS-4 codes
     geo6naicsweird = df6.loc[df6["geo4naics"].isin(weirdones['geo4naics']), :]
-    for vname in ["wages","emp3"]:
+    for vname in ["wages", "emp3"]:
         if len(geo6naicsweird) == 0:  ##If no county by NAICS6 codes, hard code the relevant values
             df4.loc[df4[vname + "_sum6by4"].isna(), vname + "_sum6by4"] = 0
             df4.loc[df4[vname + "_missing6by4"].isna(), vname + "_missing6by4"] = 0
@@ -463,15 +490,15 @@ def adjust_negative_diff(df4,df,justdrop=True):
             print(f'count na in {vname}_sum6by4 {sum(df4.loc[:, vname + "_sum6by4"].isna())}')
             print(f'in {vname}_missing6by4 {sum(df4.loc[:, vname + "_missing6by4"].isna())}')
             raise Exception(f"Something wrong\n {geo6naicsweird.head()}")
-        df4.drop(columns=["_merge",'emp3_missing6by4','emp3_propmissing6by4'], errors="ignore",inplace=True)
-        df4.drop(columns=[dropcol for dropcol in df4.columns if "_droplater" in dropcol], errors="ignore",inplace=True)
+        df4.drop(columns=["_merge", 'emp3_missing6by4', 'emp3_propmissing6by4'], errors="ignore", inplace=True)
+        df4.drop(columns=[dropcol for dropcol in df4.columns if "_droplater" in dropcol], errors="ignore", inplace=True)
         print(df4.columns)
-    #df4['cbp_flags_equal']=df4['emp3_']
+    # df4['cbp_flags_equal']=df4['emp3_']
     ## Get difference between county by NAICS4 and sum of known county by NAICS6
-    #df4[vname + "diff"] = df4[vname].astype(float) - df4[vname + '_sum6by4'].astype(float)
-    negdiff = ((df4[vname+"diff"] < 0)&(df4[vname].notna()))
-    source_notqcew = (df4[vname+'_source'] != "qcew")
-    num_missing=df4['wages_missing6by4']
+    # df4[vname + "diff"] = df4[vname].astype(float) - df4[vname + '_sum6by4'].astype(float)
+    negdiff = ((df4[vname + "diff"] < 0) & (df4[vname].notna()))
+    source_notqcew = (df4[vname + '_source'] != "qcew")
+    num_missing = df4['wages_missing6by4']
 
     ## When wagesdiff is negative...
     # CASE 1:
@@ -480,107 +507,113 @@ def adjust_negative_diff(df4,df,justdrop=True):
 
     if justdrop:
         df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname] = np.nan
-        df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname+"_source"] = np.nan
-        df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname+"diff"] = np.nan
-    else: ##### TO DO
+        df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname + "_source"] = np.nan
+        df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname + "diff"] = np.nan
+    else:  ##### TO DO
         ## After some investigation and thought, I have decided that dropping county by NAICS-4 values which lead to negative differences is the best solution.
         ## There values will be imputed like the other missing county by NAICS-4 values.
-        print('currently no method to adjust non-qcew County by NAICS-4 cells with negative differences and missing NAICS-6 cells. just dropping to refit.')
+        print(
+            'currently no method to adjust non-qcew County by NAICS-4 cells with negative differences and missing NAICS-6 cells. just dropping to refit.')
         df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname] = np.nan
         df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname + "_source"] = np.nan
         df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), vname + "diff"] = np.nan
     print(f'---- Adjusting incongruent county by NAICS-4 and by NAICS-6 {vname} ----')
-    print(f'# negative difference in {vname}: {negdiff.sum()}\n# set cntyXnaics4 to NAN: {df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew),:].shape[0]} (i.e. negative difference, >0 missing countyXnaics6, countyXnaics4 source NOT qcew)')# When missing>0:\n {pd.crosstab(negdiff[num_missing>0],df4.loc[num_missing>0,vname+"_source"])}')
-    print(f'# set cntyXnaics4 to sum6by4: {df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew),:].shape[0]} (i.e. negative difference, NO missing countyXnaics6, countyXnaics4 source NOT qcew)')
-    subdf4qcew=df4.loc[(negdiff) & (df4[vname + "_source"] == "qcew"), :]
-    print(f'# countyXnaics4 to adjust countyXnaics6: {subdf4qcew.shape[0]} (i.e. negative difference, countyXnaics4 source IS qcew)')
-    #print(f'When missing==0:\n {pd.crosstab(negdiff[num_missing==0],df4.loc[num_missing==0,vname+"_source"])}')
+    print(
+        f'# negative difference in {vname}: {negdiff.sum()}\n# set cntyXnaics4 to NAN: {df4.loc[(negdiff) & (num_missing > 0) & (source_notqcew), :].shape[0]} (i.e. negative difference, >0 missing countyXnaics6, countyXnaics4 source NOT qcew)')  # When missing>0:\n {pd.crosstab(negdiff[num_missing>0],df4.loc[num_missing>0,vname+"_source"])}')
+    print(
+        f'# set cntyXnaics4 to sum6by4: {df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew), :].shape[0]} (i.e. negative difference, NO missing countyXnaics6, countyXnaics4 source NOT qcew)')
+    subdf4qcew = df4.loc[(negdiff) & (df4[vname + "_source"] == "qcew"), :]
+    print(
+        f'# countyXnaics4 to adjust countyXnaics6: {subdf4qcew.shape[0]} (i.e. negative difference, countyXnaics4 source IS qcew)')
+    # print(f'When missing==0:\n {pd.crosstab(negdiff[num_missing==0],df4.loc[num_missing==0,vname+"_source"])}')
     # CASE 2:
     # if there are NO countyXnaics6 cells, and the countyXnaics4 source is not "qcew",
     # then override vname=vname_sum6by4, vname_source='sum6by4', and diff=0
-    df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew), vname+"diff"] = 0
+    df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew), vname + "diff"] = 0
     df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew), vname] = df4.loc[
-    (negdiff) & (num_missing == 0) & (source_notqcew), vname+"_sum6by4"]
-    df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew), vname+"_source"] = "sum6by4"
+        (negdiff) & (num_missing == 0) & (source_notqcew), vname + "_sum6by4"]
+    df4.loc[(negdiff) & (num_missing == 0) & (source_notqcew), vname + "_source"] = "sum6by4"
     ### CASE 3a:
     ## if there vname_source is qcew at countyXnaics4 level and NO missing countyXnaics6,
     ## then must adjust county by NAICS-6 non-qcew values
-    #subdf4,df6,df=adjust_nonqcew_negdiff_nomissing(subdf4=subdf4qcew[subdf4qcew[vname+'_missing6by4']==0,:],df6=df6,df=df,vname=vname)
+    # subdf4,df6,df=adjust_nonqcew_negdiff_nomissing(subdf4=subdf4qcew[subdf4qcew[vname+'_missing6by4']==0,:],df6=df6,df=df,vname=vname)
     ## CASE 3b:
     # if there vname_source is qcew at countyXnaics4 level and >0 missing countyXnaics6,
     # then must adjust county by NAICS-6 non-qcew values
 
-    subdf4, df6, df = adjust_nonqcew_negdiff_yesmissing(subdf4=subdf4qcew.loc[subdf4qcew[vname+'_missing6by4']>0,:],
-                                                    df6=df6, df=df, vname=vname)
+    subdf4, df6, df = adjust_nonqcew_negdiff_yesmissing(
+        subdf4=subdf4qcew.loc[subdf4qcew[vname + '_missing6by4'] > 0, :],
+        df6=df6, df=df, vname=vname)
 
     ## When diff is POSITIVE, and only 1 countyXnaics6 is missing
     posdiff = (df4[vname + "diff"] > 0)
     # set the missing countyXnaics6 to the diff
-    geo4naics_filldig6=df4.loc[(posdiff)&(num_missing==1),['geo4naics',vname+'diff']]
-    geo4naics_filldig6['fill_source']=vname+"diff"
+    geo4naics_filldig6 = df4.loc[(posdiff) & (num_missing == 1), ['geo4naics', vname + 'diff']]
+    geo4naics_filldig6['fill_source'] = vname + "diff"
     df6 = df6.merge(geo4naics_filldig6, on="geo4naics", how="left")
-    df6[vname] = df6[vname].fillna(df6[vname+"diff"])
-    df6[vname+"_source"] = df6[vname+"_source"].fillna(df6['fill_source'])
-    df6 = df6.drop(columns=[vname+"diff",'fill_source'])
+    df6[vname] = df6[vname].fillna(df6[vname + "diff"])
+    df6[vname + "_source"] = df6[vname + "_source"].fillna(df6['fill_source'])
+    df6 = df6.drop(columns=[vname + "diff", 'fill_source'])
     # AND update the df4 values to correspond
-    df4.loc[(posdiff)&(num_missing==1),vname+'diff']=0
+    df4.loc[(posdiff) & (num_missing == 1), vname + 'diff'] = 0
     df4.loc[(posdiff) & (num_missing == 1), vname + '_missing6by4'] = 0
     df4.loc[(posdiff) & (num_missing == 1), vname + '_sum6by4'] = df4.loc[(posdiff) & (num_missing == 1), vname]
-    return df4,df6
+    return df4, df6
 
 
-def adjust_nonqcew_negdiff_nomissing(subdf4,df6,df,vname="wages",cbpflagdf=hardcode_cbp_flags):
+def adjust_nonqcew_negdiff_nomissing(subdf4, df6, df, vname="wages", cbpflagdf=hardcode_cbp_flags):
     print(f'inside adjust_nonqcew_negdiff {vname}')
-    subdf6=df6.loc[df6['geo4naics'].isin(subdf4['geo4naics']),:]
+    subdf6 = df6.loc[df6['geo4naics'].isin(subdf4['geo4naics']), :]
     print(subdf6.columns)
     print(subdf6.head())
-    print(subdf6[vname+"_cbp_flag"].value_counts())
+    print(subdf6[vname + "_cbp_flag"].value_counts())
 
-    stophere=True
+    stophere = True
     if stophere:
         raise Exception("stop here")
     return df4, df6, df
 
-def adjust_nonqcew_negdiff_yesmissing(subdf4,df6,df,vname="wages",cbpflagdf=hardcode_cbp_flags):
+
+def adjust_nonqcew_negdiff_yesmissing(subdf4, df6, df, vname="wages", cbpflagdf=hardcode_cbp_flags):
     print(f'inside adjust_nonqcew_negdiff_yesmissing {vname}')
-    df['geo4naics']=df['geoindkey'].str.slice(stop=-2)
-    subdf4['prop_wages_from_qcew']=subdf4['count_wages_from_qcew']/subdf4['count6by4codes']
+    df['geo4naics'] = df['geoindkey'].str.slice(stop=-2)
+    subdf4['prop_wages_from_qcew'] = subdf4['count_wages_from_qcew'] / subdf4['count6by4codes']
     print(subdf4.columns)
-    #subdf4['wages_avgperest_qcew']=subdf4['sum_wages_qcew']/subdf4['count6by4codes']
-    print(subdf4[['prop_wages_from_qcew','wages_missing6by4','wagesdiff']].describe())
-    subdf4.drop(columns=['count_wages_from_cbp','wages_propmissing6by4','grouplevels'],inplace=True,errors="ignore")
-    subdf6=df6.loc[df6['geo4naics'].isin(subdf4['geo4naics']),:]
-    subdf6["vname_perest"]=subdf6[vname]/subdf6['estnum']
-    subdf6['vname_perest_qcew']=subdf6['vname_perest']
-    subdf6.loc[subdf6[vname+"_source"]!="qcew",'vname_perest_qcew']=np.nan
-    subdf6['vname_peremp3']=subdf6[vname]/subdf6['emp3']
-    subdf6['vname_peremp3_qcew']=subdf6['vname_peremp3']
-    subdf6.loc[subdf6[vname+"_source"]!="qcew",'vname_peremp3_qcew']=np.nan
-    subdf6gr=subdf6.groupby("geo4naics").agg(vname_avgperest=('vname_perest',"mean"),
-                                             vname_medperest=('vname_perest', "median"),
-                                             vname_avgperest_qcew=('vname_perest_qcew',"mean"),
-                                             vname_medperest_qcew=('vname_perest_qcew',"median"),
-                                             vname_avgperemp3=('vname_peremp3', "mean"),
-                                             vname_medperemp3=('vname_peremp3', "median"),
-                                             vname_avgperemp3_qcew=('vname_peremp3_qcew', "mean"),
-                                             vname_medperemp3_qcew=('vname_peremp3_qcew', "median")
-                                             )
+    # subdf4['wages_avgperest_qcew']=subdf4['sum_wages_qcew']/subdf4['count6by4codes']
+    print(subdf4[['prop_wages_from_qcew', 'wages_missing6by4', 'wagesdiff']].describe())
+    subdf4.drop(columns=['count_wages_from_cbp', 'wages_propmissing6by4', 'grouplevels'], inplace=True, errors="ignore")
+    subdf6 = df6.loc[df6['geo4naics'].isin(subdf4['geo4naics']), :]
+    subdf6["vname_perest"] = subdf6[vname] / subdf6['estnum']
+    subdf6['vname_perest_qcew'] = subdf6['vname_perest']
+    subdf6.loc[subdf6[vname + "_source"] != "qcew", 'vname_perest_qcew'] = np.nan
+    subdf6['vname_peremp3'] = subdf6[vname] / subdf6['emp3']
+    subdf6['vname_peremp3_qcew'] = subdf6['vname_peremp3']
+    subdf6.loc[subdf6[vname + "_source"] != "qcew", 'vname_peremp3_qcew'] = np.nan
+    subdf6gr = subdf6.groupby("geo4naics").agg(vname_avgperest=('vname_perest', "mean"),
+                                               vname_medperest=('vname_perest', "median"),
+                                               vname_avgperest_qcew=('vname_perest_qcew', "mean"),
+                                               vname_medperest_qcew=('vname_perest_qcew', "median"),
+                                               vname_avgperemp3=('vname_peremp3', "mean"),
+                                               vname_medperemp3=('vname_peremp3', "median"),
+                                               vname_avgperemp3_qcew=('vname_peremp3_qcew', "mean"),
+                                               vname_medperemp3_qcew=('vname_peremp3_qcew', "median")
+                                               )
     print(subdf6gr.head())
-    subdf6gr.rename(columns={'vname_avgperest':vname+"_avgperest",
-                             'vname_medperest':vname+"_medperest",
-                             'vname_avgperest_qcew':vname+"_avgperest_qcew",
-                             'vname_medperest_qcew':vname+"_medperest_qcew",
-                             'vname_avgperemp3':vname+"_avgperemp3",
-                             'vname_medperemp3':vname+"_medperemp3",
-                             'vname_avgperemp3_qcew':vname+"_avgperemp3_qcew",
-                             'vname_medperemp3_qcew':vname+"_medperemp3_qcew"},errors="ignore",inplace=True)
-    subdf4=subdf4.merge(subdf6gr,on=['geo4naics'],how='left',indicator=False)
-    print(subdf4[subdf4['count_wages_from_qcew']>2].head())
-    #with Pool(processes=3) as pool:
+    subdf6gr.rename(columns={'vname_avgperest': vname + "_avgperest",
+                             'vname_medperest': vname + "_medperest",
+                             'vname_avgperest_qcew': vname + "_avgperest_qcew",
+                             'vname_medperest_qcew': vname + "_medperest_qcew",
+                             'vname_avgperemp3': vname + "_avgperemp3",
+                             'vname_medperemp3': vname + "_medperemp3",
+                             'vname_avgperemp3_qcew': vname + "_avgperemp3_qcew",
+                             'vname_medperemp3_qcew': vname + "_medperemp3_qcew"}, errors="ignore", inplace=True)
+    subdf4 = subdf4.merge(subdf6gr, on=['geo4naics'], how='left', indicator=False)
+    print(subdf4[subdf4['count_wages_from_qcew'] > 2].head())
+    # with Pool(processes=3) as pool:
     #    args = [(x, df6_toget, df4n) for x in test4dig]
     #    results = pool.starmap(process_chunk, args)
     # Combine results
-    #df6_toget_imputed = pd.concat(results, ignore_index=True)
+    # df6_toget_imputed = pd.concat(results, ignore_index=True)
     # subdf=df.loc[df['geo4naics'].isin(subdf4['geo4naics']),:]
     # subcount6=get_codes_summary(subdf,groupbydigits=4, levelgrouped=6,variable=vname,include_source=False,onlyQCEW=True,perestab_stats=True)
     # subdf4gr = subdf4.merge(subcount6, on=['geo4naics'], how='left', indicator=False, suffixes=["_orig", "_qcewonly"])
@@ -592,141 +625,245 @@ def adjust_nonqcew_negdiff_yesmissing(subdf4,df6,df,vname="wages",cbpflagdf=hard
     # #print(subdf6.head())
     # #print(subdf6[vname+"_cbp_flag"].value_counts())
 
-    stophere=True
+    stophere = True
     if stophere:
         raise Exception("stop here")
     return df4, df6, df
 
-def avgestnum_source_adjustment(dfin,check_consistency=True,keep_only_filled_emp3=True):
-    df=dfin.copy()
-    if keep_only_filled_emp3:
-        df=df.loc[df["emp3"].notna(),:]
-    df=df.loc[df['estnum'].notna(),:]
-    df[['wages_old', 'emp1_old', 'emp2_old', 'emp3_old', 'estnum_old']]=df[['wages', 'emp1', 'emp2', 'emp3', 'estnum']]
-    df=adjust_by_estnum(df,groupbydigits=4,levelgrouped=6)
-    df=adjust_by_estnum(df,groupbydigits=5,levelgrouped=6)
-    df=adjust_by_estnum(df,groupbydigits=3,levelgrouped=4)
-    #df=adjust_by_estnum(df,groupbydigits=2,levelgrouped=3)
-    for vname in ["wages","emp1","emp2","emp3"]:
-        df[vname]=df[vname+"_perestnum"]*df['estnum']
-        df[vname]=df[vname].round(0)
-    levelgrouped=6
-    for grby_agglvl in [77,76,75]:
-        groupbydigits=grby_agglvl-72
-        labelstr="6by"+str(groupbydigits)
+
+def adjust_hierarchical_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adjust values to maintain hierarchical consistency across industry levels.
+
+    The adjustment works from bottom-up (highest ind_level to lowest) and
+    top-down to ensure parent totals equal sum of children.
+    """
+
+    df = df.copy()
+    df = df.sort_values(['geography', 'ind_level', 'industry']).reset_index(drop=True)
+
+    # Numeric columns to adjust
+    value_cols = ['emp1', 'emp2', 'emp3', 'wages', 'estnum']
+
+    # Get unique geographies
+    geographies = df['geography'].unique()
+
+    for geo in geographies:
+        geo_mask = df['geography'] == geo
+        geo_data = df[geo_mask].copy()
+
+        # Get industry levels in descending order (e.g., [6, 5, 4, 3, 2])
+        ind_levels = sorted(geo_data['ind_level'].unique(), reverse=True)
+
+        # Step 1: Bottom-up aggregation - calculate parent totals from children
+        for i, current_level in enumerate(ind_levels[:-1]):
+            parent_level = ind_levels[i + 1]
+
+            # Get all industries at current level
+            current_industries = geo_data[geo_data['ind_level'] == current_level]
+
+            # For each parent industry
+            parent_industries = geo_data[geo_data['ind_level'] == parent_level]['industry'].unique()
+
+            for parent_ind in parent_industries:
+                # Find children (industries that start with parent code)
+                children_mask = (
+                        (geo_data['ind_level'] == current_level) &
+                        (geo_data['industry'].str.startswith(parent_ind))
+                )
+
+                parent_mask = (
+                        (geo_data['geography'] == geo) &
+                        (geo_data['ind_level'] == parent_level) &
+                        (geo_data['industry'] == parent_ind)
+                )
+
+                if children_mask.sum() > 0:
+                    # Calculate sum of children for each value column
+                    for col in value_cols:
+                        children_sum = geo_data.loc[children_mask, col].sum()
+                        parent_value = geo_data.loc[parent_mask, col].values
+
+                        if len(parent_value) > 0:
+                            parent_val = parent_value[0]
+
+                            # If parent has no value but children do, use children sum
+                            if pd.isna(parent_val) and not pd.isna(children_sum) and children_sum > 0:
+                                geo_data.loc[parent_mask, col] = children_sum
+
+                            # If parent has value and children exist, reconcile
+                            elif not pd.isna(parent_val) and not pd.isna(children_sum):
+                                # Use parent value as the authoritative total
+                                # We'll adjust children proportionally in top-down pass
+                                pass
+
+        # Step 2: Top-down adjustment - distribute parent totals to children proportionally
+        for i, parent_level in enumerate(ind_levels[:-1]):
+            child_level = ind_levels[i + 1]
+
+            parent_industries = geo_data[geo_data['ind_level'] == parent_level]['industry'].unique()
+
+            for parent_ind in parent_industries:
+                parent_mask = (
+                        (geo_data['geography'] == geo) &
+                        (geo_data['ind_level'] == parent_level) &
+                        (geo_data['industry'] == parent_ind)
+                )
+
+                children_mask = (
+                        (geo_data['ind_level'] == child_level) &
+                        (geo_data['industry'].str.startswith(parent_ind))
+                )
+
+                if parent_mask.sum() > 0 and children_mask.sum() > 0:
+                    for col in value_cols:
+                        parent_val = geo_data.loc[parent_mask, col].values[0]
+                        children_vals = geo_data.loc[children_mask, col]
+                        children_sum = children_vals.sum()
+
+                        # If parent has value and children have values that don't match
+                        if not pd.isna(parent_val) and parent_val > 0:
+                            if not pd.isna(children_sum) and children_sum > 0:
+                                # Adjust children proportionally
+                                if abs(children_sum - parent_val) > 0.01:  # Allow small rounding errors
+                                    adjustment_factor = parent_val / children_sum
+                                    geo_data.loc[children_mask, col] = children_vals * adjustment_factor
+                            else:
+                                # Children have no values, distribute parent value equally
+                                num_children = children_mask.sum()
+                                geo_data.loc[children_mask, col] = parent_val / num_children
+
+        # Update main dataframe with adjusted values
+        df.loc[geo_mask, value_cols] = geo_data[value_cols].values
+
+    return df
+
+
+def avgestnum_source_adjustment(dfin, check_consistency=True, keep_only_filled_emp3=False, naicsdf=None, claude=True):
+    df = dfin.copy()
+    #if keep_only_filled_emp3:
+    #    df = df.loc[df["emp3"].notna(), :]
+    df = df.loc[df['estnum'].notna(), :]
+    df[['wages_old', 'emp1_old', 'emp2_old', 'emp3_old', 'estnum_old']] = df[
+        ['wages', 'emp1', 'emp2', 'emp3', 'estnum']]
+    print(f"\n number of na estnum's before adjust 4 by 6 {df['estnum'].isna().sum()}")
+
+    excluded_cbp_stem = [str(stem).replace("-", "").replace("/", "") for stem in excluded_cbp]
+    df=adjust_by_estnum(df,groupbydigits=5,levelgrouped=6,naicsdf=naicsdf)
+
+    df=adjust_by_estnum(df,groupbydigits=4,levelgrouped=5,naicsdf=naicsdf)
+    df=adjust_by_estnum(df,groupbydigits=3,levelgrouped=4,naicsdf=naicsdf)
+    df=adjust_by_estnum(df,groupbydigits=2,levelgrouped=3,naicsdf=naicsdf)
+
+    for vname in ["wages", "emp1", "emp2", "emp3"]:
+        df[vname] = df[vname + "_perestnum"] * df['estnum']
+        df[vname] = df[vname].round(0)
+
+    print("-----------------\n Checking consistency after all adjustments\n -------------------------")
+    for grby_agglvl in [77, 76, 75]:
+        groupbydigits = grby_agglvl - 72
+        levelgrouped = groupbydigits + 1
+        labelstr = str(levelgrouped) + "by" + str(groupbydigits)
+        if "geo" + str(groupbydigits) + "naics" not in df.columns:
+            str_end_idx = -(6 - groupbydigits)
+            df['geo' + str(groupbydigits) + 'naics'] = df['geoindkey'].str.slice(stop=str_end_idx)
+            if groupbydigits == 2:
+                df = geo2naics_dash_handler(df, naicsdf)
         if check_consistency:
-            countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped, variable="estnum",
-                                            onlyQCEW=False, include_source=False)
+            print(f'Checking NAICS-{levelgrouped} grouped in NAICS-{groupbydigits}: {labelstr}')
+            countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped,
+                                            variable="estnum",
+                                            onlyQCEW=False, include_source=False, naicsdf=naicsdf)
             grby_indic = (df['agglvl_code'] == grby_agglvl)
             dfgrby = df[grby_indic]
             dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
                                     suffixes=["", "_droplater"])
-            dfestnum['estnum_diff']=dfestnum['estnum']-dfestnum['estnum_sum'+labelstr]
-            notzero=(dfestnum['estnum_diff'].round(0)!=0).sum()
+            nolw = dfestnum["estnum_sum" + labelstr].isna()
+            dfestnum.loc[nolw, "estnum_sum" + labelstr] = 0
+            dfestnum.loc[nolw, "estnum_propmissing" + labelstr] = 1
+            dfestnum.loc[nolw, "estnum_missing" + labelstr] = dfestnum.loc[nolw, "estnum"]
+            dfestnum.loc[nolw, "count" + labelstr + "codes"] = 0
+            dfestnum['estnum_diff'] = dfestnum['estnum'] - dfestnum['estnum_sum' + labelstr]
+            # print(f"{labelstr}\n {dfestnum[['emp1','emp2','emp3','wages','estnum','estnum_diff']].describe()}")
+            missinglw = dfestnum["count" + labelstr + "codes"] == 0
+            if missinglw.sum() != 0:
+                print(
+                    f"There are {missinglw.sum()} countyXnaics{groupbydigits} without any countyXnaics{levelgrouped} cells in it.")
+            dfestnum = dfestnum.loc[dfestnum["count" + labelstr + "codes"] > 0, :].copy()
+            missing_estnums = dfestnum['estnum_missing' + labelstr] > 0
+            if missing_estnums.sum() > 0:
+                print(
+                    f"There are {missing_estnums.sum()} countyXnaics{groupbydigits} that are missing estnum values for some countyXnaics{levelgrouped} cells in it.")
+                print(dfestnum.loc[
+                          dfestnum['estnum_missing' + labelstr] > 0, ['geoindkey', 'estnum', 'estnum_sum' + labelstr,
+                                                                      'estnum_missing' + labelstr, "estnum_diff",
+                                                                      "estnum_source", "estnum_cbp",
+                                                                      "estnum_qcew"]].head())
+            dfestnum_new = dfestnum.loc[dfestnum['estnum_missing' + labelstr] == 0, :].copy()
+            notzero = dfestnum_new.loc[(dfestnum_new['estnum_diff'].round(0) != 0) & (
+                ~dfestnum_new["geoindkey"].str.contains("|".join(excluded_cbp), regex=True)), :].shape[0]
             if notzero != 0:
                 print(
-                    f'There are {notzero} countyXnaics{groupbydigits} cells with inconsistent establishment numbers to the countyXnaics6 cells. ( {100 * notzero / (dfestnum.shape[0])}%)')
+                    f'There are {notzero} countyXnaics{groupbydigits} cells with inconsistent establishment numbers to the countyXnaics{levelgrouped} cells. ( {100 * notzero / (dfestnum.shape[0])}%) after removing groupings with no grouped cells and cells with missing subcells.')
                 print(dfestnum.loc[dfestnum['estnum_diff'] != 0, ['geoindkey', 'estnum', 'estnum_sum' + labelstr,
                                                                   'estnum_missing' + labelstr, "estnum_diff",
                                                                   "estnum_source", "estnum_cbp", "estnum_qcew"]].head())
-    countlvldig = get_codes_summary(df, groupbydigits=3, levelgrouped=4, variable="emp3",
-                                    onlyQCEW=False, include_source=False)
-    #print(countlvldig.describe())
-
-    #print(countlvldig.loc[countlvldig["emp3_missing4by3"]>1,:].head())
-    print(f'Currently {countlvldig.loc[countlvldig["emp3_missing4by3"]>1,:].shape[0]} emp3 values at countyXnaics3 level with only 1 missing countyXnaics4 cell.')
-    # miss1=countlvldig.loc[countlvldig["emp3_missing4by3"] == 1, ["emp3_sum4by3", "geo3naics"]]
-    # df75 = df.loc[df['agglvl_code']==75,["geo3naics","emp3","emp3_source"]].merge(miss1,on="geo3naics",how="left",indicator=False)
-    # df75['emp3_diff']=df75["emp3"]-df75['emp3_sum4by3']
-    # df=df.merge(df75[["geo3naics","emp3_diff"]],on="geo3naics",how="left",indicator=False)
-    # df.loc[(df["geo3naics"].isin(df75['geo3naics']))&(df['agglvl_code']==76)&(df['emp3'].isna()),'emp3']=df.loc[(df["geo3naics"].isin(df75['geo3naics']))&(df['agglvl_code']==76)&(df['emp3'].isna()),'emp3_diff']
-    # df.drop(columns="emp3_diff",inplace=True)
-    # countlvldig = get_codes_summary(df, groupbydigits=3, levelgrouped=4, variable="emp3",
-    #                                 onlyQCEW=False, include_source=False)
-    # #print(countlvldig.describe())
-    #
-    # #print(countlvldig.loc[countlvldig["emp3_missing4by3"] ==1, :].head())
-    # #print(f'Now {countlvldig.loc[countlvldig["emp3_missing4by3"]>1,:].shape[0]} emp3 values at countyXnaics3 level with only 1 missing countyXnaics4 cell.')
-    #
-    # #raise Exception("stop here")
-    #print(df.loc[df["estnum"]!=df["estnum_old"],
-    #             ["geoindkey","estnum","estnum_old","estnum_source","emp1","emp1_old","emp2","emp2_old","emp3","emp3_old","wages","wages_old","emp1_source","emp2_source","emp3_source","wages_source"]].head())
-    #print(df.loc[df['geoindkey'].str.startswith("1001_113"),:].shape[0])
-    #print(df.loc[df['geoindkey'].str.startswith("1001_113"),["geoindkey","estnum","estnum_old","estnum_source"]].head())
-
 
 
     return df
 
-def adjust_by_estnum(dfin2,groupbydigits=4, levelgrouped=6,justestnum=True,check_consistency=True):
-    df=dfin2.copy()
-    if groupbydigits<2 or groupbydigits>5:
-        raise Exception(f'Code does not currently support adjustments to the county level values. groupbydigits should be 2,3,4, or 5.')
-    grby_agglvl=72+groupbydigits
+
+def adjust_by_estnum(dfin2, groupbydigits=4, levelgrouped=6, justestnum=True, check_consistency=True, naicsdf=None,
+                     printmore=False):
+    df = dfin2.copy()
+    if groupbydigits < 2 or groupbydigits > 5:
+        raise Exception(
+            f'Code does not currently support adjustments to the county level values. groupbydigits should be 2,3,4, or 5.')
+    grby_agglvl = 72 + groupbydigits
     str_end_idx = -(6 - groupbydigits)
-    df['geo'+str(groupbydigits)+'naics'] = df['geoindkey'].str.slice(stop=str_end_idx)
-    countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped, variable="estnum", onlyQCEW=False,include_source=False)
-    grby_indic=(df['agglvl_code']==grby_agglvl)
-    dfgrby=df[grby_indic]
-    dfestnum = dfgrby.merge(countlvldig, on=['geo'+str(groupbydigits)+'naics'], how='left', indicator=False, suffixes=["", "_droplater"])
+    df['geo' + str(groupbydigits) + 'naics'] = df['geoindkey'].str.slice(stop=str_end_idx)
+    if groupbydigits == 2:
+        df = geo2naics_dash_handler(df, naicsdf)
+    countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped, variable="estnum",
+                                    onlyQCEW=False, include_source=False, naicsdf=naicsdf)
+    grby_indic = (df['agglvl_code'] == grby_agglvl)
+    dfgrby = df[grby_indic]
+    dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
+                            suffixes=["", "_droplater"])
     dfestnum.drop(columns=[dropcol for dropcol in dfestnum.columns if "_droplater" in dropcol], errors="ignore",
-                   inplace=True)
-    labelstr=str(levelgrouped)+"by"+str(groupbydigits)
-    if justestnum: #just adjusting the establishment number (adjust the variable values in avgestnum_source_adjustment function)
-        dfestnum['estnum'] = dfestnum['estnum_sum'+labelstr]
-        df = df.merge(dfestnum[['geoindkey', 'estnum']], on="geoindkey", how="left",
-                      indicator=False, suffixes=["", "_adj"])
-        df.loc[df['agglvl_code']==grby_agglvl,'estnum']=df.loc[df['agglvl_code']==grby_agglvl, 'estnum_adj']
-        df.drop(columns='estnum_adj',inplace=True,errors="ignore")
+                  inplace=True)
+    labelstr = str(levelgrouped) + "by" + str(groupbydigits)
+    excluded_cbp_stem = [str(stem).replace("-", "").replace("/", "") for stem in excluded_cbp]
+    if justestnum:  # just adjusting the establishment number (adjust the variable values in avgestnum_source_adjustment function)
+        dfestnum['estnum_new'] = dfestnum['estnum_sum' + labelstr]
+        df = df.merge(dfestnum[['geoindkey', 'estnum_new']], on="geoindkey", how="left", indicator=False)
+        numna = df.loc[(df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].isna()) & (
+            ~df["geoindkey"].str.startswith(tuple(excluded_cbp_stem))), :].shape[0]
+        if numna > 0 and printmore:
+            print(
+                f"for {labelstr} estnum: there are {numna} at agglevel {grby_agglvl} which are NA based on sum{labelstr}.")
+        df.loc[(df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].notna()), 'estnum'] = df.loc[
+            (df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].notna()), 'estnum_new']
+        df.drop(columns='estnum_new', inplace=True, errors="ignore")
     else:
         for vname in ['wages', 'emp1', 'emp2', 'emp3']:
-            vname_grby_source=dfestnum[vname+"_source"]
-            vname_grby_source[vname_grby_source=="qwi"]="qcew"
-            estnum_s=dfestnum["estnum_qcew"]
-            estnum_s[vname_grby_source=="cbp"]=dfestnum.loc[vname_grby_source=="cbp","estnum_cbp"]
-            dfestnum[vname + '_perest'] = dfestnum[vname] /estnum_s
+            vname_grby_source = dfestnum[vname + "_source"]
+            vname_grby_source[vname_grby_source == "qwi"] = "qcew"
+            estnum_s = dfestnum["estnum_qcew"]
+            estnum_s[vname_grby_source == "cbp"] = dfestnum.loc[vname_grby_source == "cbp", "estnum_cbp"]
+            dfestnum[vname + '_perest'] = dfestnum[vname] / estnum_s
             # df4estnum['old_'+vname]=df4estnum[vname]
-            dfestnum[vname] = dfestnum[vname + "_perest"] * dfestnum['estnum_sum'+labelstr]
+            dfestnum[vname] = dfestnum[vname + "_perest"] * dfestnum['estnum_sum' + labelstr]
             dfestnum.drop(columns=[vname + "_perest"], inplace=True)
-        dfestnum['estnum'] = dfestnum['estnum_sum'+labelstr]
+        dfestnum['estnum'] = dfestnum['estnum_sum' + labelstr]
 
         df = df.merge(dfestnum[['geoindkey', 'wages', 'emp1', 'emp2', 'emp3', 'estnum']], on="geoindkey", how="left",
                       indicator=False, suffixes=["", "_adj"])
         df.loc[df['agglvl_code'] == grby_agglvl, ['wages', 'emp1', 'emp2', 'emp3', 'estnum']] = df.loc[
             df['agglvl_code'] == grby_agglvl, ['wages_adj', 'emp1_adj', 'emp2_adj', 'emp3_adj', 'estnum_adj']]
         df.drop(columns=['wages_adj', 'emp1_adj', 'emp2_adj', 'emp3_adj', 'estnum_adj'], inplace=True, errors="ignore")
-        #df=df.merge(dfestnum[['geoindkey','wages', 'emp1', 'emp2', 'emp3','estnum']],on="geoindkey",how="left",indicator=False,suffixes=["_old",""])
-        #df.loc[grby_indic,['old_wages', 'old_emp1', 'old_emp2', 'old_emp3','old_estnum']]=df.loc[grby_indic,['wages', 'emp1', 'emp2', 'emp3','estnum']]
-        #df.loc[grby_indic,['wages', 'emp1', 'emp2', 'emp3','estnum']]=dfestnum[['wages', 'emp1', 'emp2', 'emp3','estnum']]
-    if check_consistency:
-        countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped, variable="estnum",
-                                        onlyQCEW=False, include_source=False)
-        grby_indic = (df['agglvl_code'] == grby_agglvl)
-        dfgrby = df[grby_indic]
-        dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
-                                suffixes=["", "_droplater"])
-        dfestnum['estnum_diff']=dfestnum['estnum']-dfestnum['estnum_sum'+labelstr]
-        notzero=(dfestnum['estnum_diff'].round(0)!=0).sum()
 
-        if notzero!=0:
-            print(f'There are {notzero} countyXnaics{groupbydigits} cells with inconsistent establishment numbers to the countyXnaics{levelgrouped} cells. ( {100*notzero/(dfestnum.shape[0])}%)')
-            print(dfestnum.loc[dfestnum['estnum_diff']!=0,['geoindkey','estnum','estnum_sum'+labelstr,'estnum_missing'+labelstr,"estnum_diff","estnum_source","estnum_cbp","estnum_qcew"]].head())
-        # if not justestnum:
-        #     for vname in ["wages","emp1","emp2","emp3"]:
-        #         countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped,
-        #                                         variable=vname,
-        #                                         onlyQCEW=False, include_source=False)
-        #         dfestnum = dfestnum.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
-        #                                 suffixes=["", "_droplater"])
-        #         dfestnum[vname+'_diff'] = dfestnum[vname] - dfestnum[vname+'_sum' + labelstr]
-        #         negdiff = ((dfestnum[vname].notna())&(dfestnum[vname+'_diff'].round(0)< 0)).sum()
-        #         #print(
-        #         #    f'{vname} in {labelstr}: {negdiff}  negative differences (i.e. {100*negdiff/(dfestnum[vname].notna().sum())}%)')
+    df = df[df["estnum"].notna()]
     return df
 
 
-
-
-def adjust_nonqcew_negdiff_yesmissing_per_naics4():
-
-    return np.nan #get_6naics_per4(x, df6=df6_toget, df4imp=df4n)

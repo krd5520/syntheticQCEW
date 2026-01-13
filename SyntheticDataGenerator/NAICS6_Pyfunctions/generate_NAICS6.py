@@ -13,7 +13,7 @@ from adjustmentFunctions import  *
 
 use_QWI_for_wages=True
 
-def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=None,df=None):
+def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=None,df=None,naicsdf=None):
     ##################  Dataframes set up  #######################
     # Load main dataset. Location is set in the config.yaml
     # Tell the user where the dataset is located
@@ -44,15 +44,17 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
 
     # Extract 6-digit NAICS
     df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
-    df6['geo4naics'] = df6['geoindkey'].str[:-2]
-    #df6['geo5naics'] = df6['geoindkey'].str[:-1]
+    df6['geo4naics'] = df6['geoindkey'].str.slice(stop=-2)
+    df6['geo5naics'] = df6['geoindkey'].str.slice(stop=-1)
+    df6['geo3naics'] = df6['geoindkey'].str.slice(stop=-3)
 
     df4 = df[df['agglvl_code'] == 76].copy()
     df4['geo4naics'] = df4['geoindkey'].str.slice(stop=-2)
     df4['geo3naics'] = df4['geoindkey'].str.slice(stop=-3)
 
-    #df4,df6,df=adjust_negative_diff(df4=df4,df=df)
 
+    #df4,df6,df=adjust_negative_diff(df4=df4,df=df)
+    print(f"Num na in emp1 at countyXnaics6 level {df6['emp1'].isna().sum()}")
     #get countyXnaics6 within countyXnaics4 summary information
     for vname in ["emp1", "wages"]:
         count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable=vname)
@@ -122,6 +124,7 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1diff"] = 0
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1"] = df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1_sum6by4"]
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1_source"] = "sum6by4"
+
     m1empfit = get_m1emp_model(df=df4,employmentConfig=employmentConfig)
     #print(pd.crosstab(df4["emp1_source"], df4["emp2_source"], dropna=False))
 
