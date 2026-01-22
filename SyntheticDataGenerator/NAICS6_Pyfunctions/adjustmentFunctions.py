@@ -19,6 +19,36 @@ from hierarchy_geoindkey import *
 #     config = yaml.safe_load(configFile)
 #     employmentConfig = config['employmentConfig']
 pd.set_option('mode.chained_assignment', None)
+# ============================================================================
+# CONFIGURATION AND CONSTANTS
+# ============================================================================
+
+# Flag for development/testing mode - set to False in production
+PRINTHEADS = False
+
+# Hard-coded NAICS codes excluded from CBP (Census Bureau of Population) data
+EXCLUDED_CBP_NAICS6 = ["525110", "525120", "525190", "525920", "541120"]
+EXCLUDED_CBP = [
+    "92----",   # Public administration
+    "111///",   # Crop production
+    "112///",   # Animal production
+    "482///",   # Rail transportation
+    "491///",   # Postal service
+    "814///",   # Private households
+    "525110",   # Open-end investment funds
+    "525120",   # Closed-end investment funds
+    "525190",   # Other financial vehicles
+    "525920",   # Trusts, estates, and agency accounts
+    "541120"    # Offices of other holding companies
+]
+
+# Configuration dataframe for CBP data quality flags
+# Maps suppression flags to minimum and maximum noise percentages
+HARDCODE_CBP_FLAGS = pd.DataFrame({
+    'flag': ["G", "H", "J"],
+    'min_noise_percent': [0.0, 0.02, 0.05],
+    'max_noise_percent': [0.02, 0.05, np.nan]
+})
 
 printheads = False  # for testing in development
 ## Hard-coded, NAICS codes which CBP does not include in its data.
@@ -158,7 +188,7 @@ def get_varmin(codes4naics, fulldf, variable="emp1"):
         DataFrame with geoindkey and calculated minwage values
     '''
     # Get 6-digit NAICS summaries
-    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable)
+    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable,include_estab_emp3_stats=False)
     # Create minwage column (0 if no data available)
     tomerge6dig['min' + variable] = np.where(tomerge6dig[variable + '_sum6by4'].isna(), 0,
                                              tomerge6dig[variable + '_sum6by4'])
@@ -420,7 +450,7 @@ def get_varmaxmindf(df4dig, fulldf, variable="emp1", onlyqcew=True):
 def adjust_negative_diff(df4, df, justdrop=True):
     # get summary of countyXnaics6 cells by countyXnaics4 codes for estnum, wages, and emp3
     count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum", onlyQCEW=False,
-                                  include_source=False)
+                                  include_source=False,include_estab_emp3_stats=False)
     df4estnum = df4.merge(count6dig, on=['geo4naics'], how='left', indicator=False, suffixes=["", "_droplater"])
     df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "_droplater" in dropcol], errors="ignore",
                    inplace=True)
@@ -446,9 +476,9 @@ def adjust_negative_diff(df4, df, justdrop=True):
     df6['geo3naics'] = df6['geoindkey'].str.slice(stop=-3)
 
     count6digwages = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="wages", onlyQCEW=False,
-                                       include_source=True)
+                                       include_source=True,include_estab_emp3_stats=False)
     count6digemp3 = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="emp3", onlyQCEW=False,
-                                      include_source=True)
+                                      include_source=True,include_estab_emp3_stats=False)
     df4estnum = df4estnum.merge(count6digwages, on=['geo4naics'], how='left', indicator=True,
                                 suffixes=["", "_droplater"])
     df4estnum.drop(columns=[dropcol for dropcol in df4estnum.columns if "_droplater" in dropcol], errors="ignore",
@@ -773,7 +803,7 @@ def avgestnum_source_adjustment(dfin, check_consistency=True, keep_only_filled_e
             print(f'Checking NAICS-{levelgrouped} grouped in NAICS-{groupbydigits}: {labelstr}')
             countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped,
                                             variable="estnum",
-                                            onlyQCEW=False, include_source=False, naicsdf=naicsdf)
+                                            onlyQCEW=False, include_source=False, naicsdf=naicsdf,include_estab_emp3_stats=False)
             grby_indic = (df['agglvl_code'] == grby_agglvl)
             dfgrby = df[grby_indic]
             dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
@@ -825,7 +855,7 @@ def adjust_by_estnum(dfin2, groupbydigits=4, levelgrouped=6, justestnum=True, ch
     if groupbydigits == 2:
         df = geo2naics_dash_handler(df, naicsdf)
     countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped, variable="estnum",
-                                    onlyQCEW=False, include_source=False, naicsdf=naicsdf)
+                                    onlyQCEW=False, include_source=False, naicsdf=naicsdf,include_estab_emp3_stats=False)
     grby_indic = (df['agglvl_code'] == grby_agglvl)
     dfgrby = df[grby_indic]
     dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,

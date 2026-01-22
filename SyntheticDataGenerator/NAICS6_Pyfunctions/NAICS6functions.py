@@ -130,7 +130,15 @@ def get_wage6_per4(subdf6,subdf4,rseed=None):
             print("WARNING: remainders are negative!")
             codes = ','.join(subdf6['geoindkey'].astype(str).tolist())
             print(f"Remainders: wage {float(remain_wage)} Codes: {codes}")
-            print(f"subdf4 wages len {subdf4['wages'].shape[0]} sum {subdf4['wages'].sum()} (max, min) {subdf4['maxwages'].values}, {subdf4['minwages'].values}, wages source {subdf4['wages_source'].values}, subdf6 wages sum {subdf6['wages'].astype(float).sum()} \n subdf6 {subdf6[['geoindkey','wages','wages_source']]}")
+            print(f"subdf4 wages len {subdf4['wages'].shape[0]} sum {subdf4['wages'].sum()} (max, min) {subdf4['maxwages'].values}, {subdf4['minwages'].values}, wages source {subdf4['wages_source'].values}, subdf6 wages sum {subdf6['wages'].astype(float).sum()} \n subdf6 {subdf6[['geoindkey','emp1','emp3','wages','wages_source']]}")
+        if remain_wage==float('inf'):
+            print("WARNING: remainders are infinite!")
+            codes = ','.join(subdf6['geoindkey'].astype(str).tolist())
+            print(f"Remainders: wage {float(remain_wage)} Codes: {codes}")
+            print(
+                f"subdf4 wages len {subdf4['wages'].shape[0]} sum {subdf4['wages'].sum()} (max, min) {subdf4['maxwages'].values}, {subdf4['minwages'].values}, wages source {subdf4['wages_source'].values}, subdf6 wages sum {subdf6['wages'].astype(float).sum()} \n subdf6 {subdf6[['geoindkey','emp1','emp3', 'wages', 'wages_source']]}")
+            print(subdf4[['geoindkey','wages','emp1','emp3','wages_source']])
+            raise Exception("why inf?")
     #subdf6['wages'] = subdf6['q'] # Start with known values
     unknown_indic = (subdf6['wages'].isna())
     # Distribute remaining wage to suppressed entries
@@ -138,6 +146,7 @@ def get_wage6_per4(subdf6,subdf4,rseed=None):
         subdf6.loc[unknown_indic, 'wages'] = remain_wage
         subdf6.loc[unknown_indic, 'wages_source'] = "remainder"
     else:
+        #print(f'in get_wages6_per4 {remain_wage}')
         subdf6unknown = subdf6[unknown_indic]
         rprop = np.random.dirichlet(dirichletparams_wages(sub6=subdf6unknown), size=1)
         mask = (subdf6['wages'].isna())# & (~subdf6['qp1_nf'].isna())
@@ -165,6 +174,10 @@ def get_6naics_per4(naics4dig,df6,df4imp,rseed=None):
         subdf6wage['emp3'] = np.nan
         subdf6wage['wages'] = np.nan
     else:
+        if subdf6emp['emp1'].isna().sum()>0:
+            print("in get_6naics_per4")
+            print(subdf6emp[['agglvl_code','geoindkey','emp1','estnum']].head())
+            print(subdf4[['agglvl_code','geoindkey','emp1','estnum']].head())
         subdf6wage = get_wage6_per4(subdf6=subdf6emp,subdf4=subdf4)
     # Cleanup before returning
     #subdf6wage = subdf6wage.drop(columns=['qp1', 'qp1_nf', 'emp', 'geo5naics'],errors="ignore")
@@ -209,7 +222,7 @@ def get_6naics_all(df, df4n, codes4summary, rseed=None,keepqcew=True):
     if n_geo4naics!=n_df6_geo4naics:
         print(f"Number of unique geo4naics codes do not align. In countyXnaics4 {n_geo4naics} in countyXnaics6 {n_df6_geo4naics}.")
         print(df6_geo4naics_codes[~df6_geo4naics_codes.isin(geo4naics_codes)].head())
-    raise Exception("stop here")
+    #raise Exception("stop here")
     # Prepare complex cases for parallel processing
     df6_toget = df[~df['geo4naics'].isin(codesNOTtoget)]
     #get_m3emp6_all(
@@ -218,6 +231,19 @@ def get_6naics_all(df, df4n, codes4summary, rseed=None,keepqcew=True):
     #)
     test4dig = df6_toget['geo4naics'].unique()
     print(f"Execution time: {time.time() - timestart1:.4f} seconds")
+
+    # counter=0
+    # for x in test4dig:
+    #     #print("----------"*5)
+    #
+    #     #print(f"---------- {x} is for counter {counter} ------------")
+    #
+    #     #print("----------"*5)
+    #     counter=counter+1
+    #     process_chunk(x,df6_toget,df4n)
+    #     if counter>50:
+    #         raise Exception("stop here")
+
     # Parallel processing setup
     args = [(x, df6_toget, df4n) for x in test4dig]
     with Pool(processes=3) as pool:
@@ -228,4 +254,13 @@ def get_6naics_all(df, df4n, codes4summary, rseed=None,keepqcew=True):
     combined_df = pd.concat([df6_toget_imputed, df6_onecodeper4], ignore_index=True)
     return combined_df
 
-
+#
+# df6=pd.read_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df6.csv")
+# df4imp=pd.read_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df4imp.csv")
+# count6dig=pd.read_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_count6dig.csv")
+# # ################## Get NAICS6 By County Aggregates #######################
+# print('---------- Getting NAICS6 by County Aggregates ----------')
+# print('This may take a while, please be patient...')
+# #     # Distribute values from 4-digit to 6-digit NAICS
+# print(f'df4imp head before get_6naics_all in generate_NAICS.py:\n{df4imp.head()}')
+# naics6df = get_6naics_all(df6, df4imp, codes4summary=count6dig)

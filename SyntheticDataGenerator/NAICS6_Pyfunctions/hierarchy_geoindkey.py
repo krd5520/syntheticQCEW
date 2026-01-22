@@ -120,7 +120,7 @@ def fill_from_geoindkey(data,numeric_ind_level=True,naics_xwalk=None):
 def count_notna(x):
     return x.notna().sum()
 
-def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=True,perestab_stats=False,naicsdf=None):
+def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=False,perestab_stats=False,naicsdf=None, include_estab_emp3_stats=True):
     '''
     What is the point?
         get_codes_summary() aggregates wage data (qp1) from detailed NAICS codes up to higher
@@ -183,21 +183,69 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
         df['geodignaics'] = df['geoindkey'].str[:str_end_idx]
 
     if include_source:
-        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable, variable+'_source']]
+        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable, variable+'_source',"emp3"]]
     elif variable=="estnum" or "estnum" not in df.columns:
-        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', variable]]
+        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', variable,"emp3"]]
     else:
-        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable]]
+        df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable,"emp3"]]
+
+    if variable!='estnum' and include_estab_emp3_stats:
+        df['estab_notna']=df['estnum']
+        df.loc[df[variable].isna(),'estab_notna']=0
+        df['estab_na']=df['estnum']
+        df.loc[df[variable].notna(),'estab_na']=0
+        df['emp3_notna'] = df['emp3']
+        df.loc[df[variable].isna(), 'emp3_notna'] = 0
+        df['emp3_na'] = df['emp3']
+        df.loc[df[variable].notna(), 'emp3_na'] = 0
+    elif include_estab_emp3_stats:
+        df['emp3_notna'] = df['emp3']
+        df.loc[df[variable].isna(), 'emp3_notna'] = 0
+        df['emp3_na'] = df['emp3']
+        df.loc[df[variable].notna(), 'emp3_na'] = 0
     df[variable]=df[variable].astype(float)
     # Step 4: Aggregate data by grouping key
     if perestab_stats and variable!="estnum":
-        df['newcolname_perest']=df[variable]/df['estnum']
+        df['newcolname_perest'] = df[variable] / df['estnum']
+        if include_estab_emp3_stats:
+            count6dig = df.groupby('geodignaics').agg(
+                CountCodes=('geoindkey', 'count'),
+                newcolname=(variable, lambda x: np.nansum(x)),
+                newcolname_missing=(variable, lambda x: x.isna().sum()),
+                newcolname_avgperest=('newcolname_perest',"mean"),
+                newcolname_medperest=('newcolname_perest', "median"),
+                estnum_na=('estab_na',lambda x:x.sum()),
+                estnum_notna=('estab_notna', lambda x: x.sum()),
+                emp3_na=('emp3_na', lambda x: x.sum()),
+                emp3_notna=('emp3_notna', lambda x: x.sum())
+            )
+        else:
+            count6dig = df.groupby('geodignaics').agg(
+                CountCodes=('geoindkey', 'count'),
+                newcolname=(variable, lambda x: np.nansum(x)),
+                newcolname_missing=(variable, lambda x: x.isna().sum()),
+                newcolname_avgperest=('newcolname_perest',"mean"),
+                newcolname_medperest=('newcolname_perest', "median")
+            )
+    elif include_estab_emp3_stats and variable!="estnum":
+        # Step 4: Aggregate data by grouping key
         count6dig = df.groupby('geodignaics').agg(
             CountCodes=('geoindkey', 'count'),
             newcolname=(variable, lambda x: np.nansum(x)),
             newcolname_missing=(variable, lambda x: x.isna().sum()),
-            newcolname_avgperest=('newcolname_perest',"mean"),
-            newcolname_medperest=('newcolname_perest', "median")
+            estnum_na=('estab_na', lambda x: x.sum()),
+            estnum_notna=('estab_notna', lambda x: x.sum()),
+            emp3_na=('emp3_na', lambda x: x.sum()),
+            emp3_notna=('emp3_notna', lambda x: x.sum())
+        )
+    elif include_estab_emp3_stats:
+        # Step 4: Aggregate data by grouping key
+        count6dig = df.groupby('geodignaics').agg(
+            CountCodes=('geoindkey', 'count'),
+            newcolname=(variable, lambda x: np.nansum(x)),
+            newcolname_missing=(variable, lambda x: x.isna().sum()),
+            emp3_na=('emp3_na', lambda x: x.sum()),
+            emp3_notna=('emp3_notna', lambda x: x.sum())
         )
     else:
         # Step 4: Aggregate data by grouping key
@@ -218,6 +266,14 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
 
     count6dig=count6dig.reset_index()
     count6dig['propmissing']=count6dig['newcolname_missing']/count6dig['CountCodes']
+    if include_estab_emp3_stats:
+        for cname in ["estnum_na",'estnum_notna','emp3_na',"emp3_notna"]:
+            if cname in count6dig.columns:
+                count6dig[cname].fillna(0)
+        count6dig['emp3_propmissing'] = count6dig['emp3_na'] / (
+                    count6dig['emp3_na'] + count6dig['emp3_notna'])  # CountCodes']
+        if 'estnum_na' in count6dig.columns:
+            count6dig['estnum_propmissing'] = count6dig['estnum_na'] / (count6dig['estnum_na']+count6dig['estnum_notna'])#CountCodes']
     if set(df['geodignaics'].to_list()) != set(count6dig['geodignaics'].to_list()):
         print(
             f"count6dig is missing some geodignaics: {set(df['geodignaics'].to_list()) - set(count6dig['geodignaics'].to_list())}")
@@ -231,24 +287,20 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
         variable=variable.replace("_qcew","")
     if "geo"+str(groupbydigits)+"naics" in count6dig.columns:
         count6dig.drop(columns="geo"+str(groupbydigits)+"naics",inplace=True)
-    if perestab_stats and variable!="estnum":
-        count6dig = count6dig.rename(columns={
-            'geodignaics': f'geo{groupbydigits}naics',
-            'CountCodes': f'count{label_group}codes',
-            'newcolname': f'{variable}_sum{label_group}',
-            'newcolname_missing': f'{variable}_missing{label_group}',
-            'propmissing': f'{variable}_propmissing{label_group}',
-            'newcolname_avgperest':f'{variable}_avgperest{label_group}',
-            'newcolname_medperest':f'{variable}_medperest{label_group}'
-        })
-    else:
-        count6dig = count6dig.rename(columns={
-            'geodignaics': f'geo{groupbydigits}naics',
-            'CountCodes': f'count{label_group}codes',
-            'newcolname': f'{variable}_sum{label_group}',
-            'newcolname_missing': f'{variable}_missing{label_group}',
-            'propmissing':f'{variable}_propmissing{label_group}'
-        })
+
+    count6dig = count6dig.rename(columns={
+        'geodignaics': f'geo{groupbydigits}naics',
+        'CountCodes': f'count{label_group}codes',
+        'newcolname': f'{variable}_sum{label_group}',
+        'newcolname_missing': f'{variable}_missing{label_group}',
+        'propmissing': f'{variable}_propmissing{label_group}',
+        'newcolname_avgperest': f'{variable}_avgperest{label_group}',
+        'newcolname_medperest': f'{variable}_medperest{label_group}',
+        'estnum_na':f'estnum_{variable}_missing{label_group}',
+        'estnum_propmissing': f'estnum_{variable}_propmissing{label_group}',
+        'emp3_na': f'emp3_{variable}_missing{label_group}',
+        'emp3_propmissing': f'emp3_{variable}_propmissing{label_group}'
+        },errors="ignore")
 
     #count6dig.rename(columns={"newcolname":newcolname,"newcolname_missing":newcolname+"_missing"},inplace=True)
     return count6dig
@@ -303,14 +355,24 @@ def get_xwalk_naics(crosswalk_file,expand_naics2=True):
 
     return xwalk
 
+## Some industry codes only have one 'child' industry code. Sometimes the data omits the child cells for redundancy
+## We need to add it back in.
+## INPUTS:
+## df is dataframe with "geoindkey" column
+## naicsdf is output of process_naics_file
 def one_naics_code_below_filler(df,naicsdf):
-    onlyonebelow=[]
+    onlyonebelow=[] #initialize list of dataframes
+    # for X in levels naics2,3,4,and 5
+    #       find the naicsX codes with only one child naics(X+1)
     for ilvl in [2,3,4,5]:
+        #get count of each naicsX and industry industry level combination
         grbydf=naicsdf.groupby(['naics'+str(ilvl),'ind_level']).size().reset_index()
         grbydf.columns=["naics"+str(ilvl),"ind_level","count"]
-        grbydf=grbydf.loc[grbydf["ind_level"]!=ilvl,:]
+        grbydf=grbydf.loc[grbydf["ind_level"]!=ilvl,:] #remove those in the current ilvl (only those below remain)
+        #get data (naicsX codes) which is only one (or 0) naics(X+1) codes below it
         ilvl_onebelow=grbydf.loc[(grbydf["ind_level"]==ilvl+1)&(grbydf["count"]<2),:].copy()
-        if ilvl_onebelow.shape[0]>0:
+        if ilvl_onebelow.shape[0]>0: #if there are such codes
+            #make dataframe with ilvl+1, naicsX code, naicsX code formatted like geoindkey, and naics(X+1) code
             lwdf = naicsdf.loc[
                 naicsdf["ind_level"] == ilvl + 1, ["naics" + str(ilvl), "formatted_code", "ind_level", "naics"]]
             lwdf["additional_digit"]=lwdf["naics"].astype(str).str.slice(start=-1)
@@ -321,45 +383,124 @@ def one_naics_code_below_filler(df,naicsdf):
             codesbelow.rename(columns={"naics" + str(ilvl): "code", "formatted_code": "single_code_level_below"},
                               inplace=True)
             ilvl_onebelow["code"]=ilvl_onebelow['naics'+str(ilvl)]
-            ilvl_onebelow.drop(columns="naics"+str(ilvl),inplace=True)
+            ilvl_onebelow.drop(columns=["naics"+str(ilvl),"count"],inplace=True)
             ilvl_onebelow=ilvl_onebelow.merge(codesbelow,on="code",how="left",indicator=False)
+            #ilvl_onebelow has "ind_level" for ilvl+1,"code" is just numeric code at ilvl,
+            # "single_code_level_below" is formatted code for ilvl+1 that is below 'code'
+            # "additional_digit" is the digit appended to 'code' to get numeric code for 'single_code_level_below'
             onlyonebelow.append(ilvl_onebelow)
-    onebelowdf=pd.concat(onlyonebelow)
+    onebelowdf=pd.concat(onlyonebelow) #combined the dataframes from ilvl 2,3,4,5
     onebelowdf["formatted_code"]=onebelowdf["code"].map(format_industry_from_code)
-    #print(onebelowdf.describe())
-    print(onebelowdf[["additional_digit","formatted_code","single_code_level_below"]].head(10))
-    print(onebelowdf.shape)
-    print(onebelowdf['additional_digit'].value_counts())
-    print(onebelowdf.loc[~onebelowdf["additional_digit"].isin(["0","1","9"]),["additional_digit","formatted_code","single_code_level_below","ind_level"]])
+
+    #print(onebelowdf[["additional_digit","formatted_code","single_code_level_below"]].head(10))
+    #print(onebelowdf.shape)
+    #print(onebelowdf['additional_digit'].value_counts())
+    #print(onebelowdf.loc[~onebelowdf["additional_digit"].isin(["0","1","9"]),["additional_digit","formatted_code","single_code_level_below","ind_level"]])
     if "industry" not in df.columns:
         df["industry"]=df['geoindkey'].str.split("_")[1]
-    for ilvl in [2,3,4,5]:
-        df=one_level_one_naics_code_below_filler(df,onebelowdf,level=ilvl)
+    for ilvl in [6,5,4,3]:
+        #print(f"{ilvl} up")
+        level_onebelow=onebelowdf.loc[onebelowdf['ind_level']==ilvl,:]
+        #print(f"{ilvl} get df rows that match one code below options")
+        already_filled=df.loc[df['industry'].isin(level_onebelow['single_code_level_below']),["geoindkey","estnum","industry","emp1","emp2","emp3","wages","emp1_source","emp2_source","emp3_source","wages_source","estnum_source"]]
+        #print(already_filled.head())
+        #print(f"count of naics-{ilvl} code that are only children that appear in df already {level_onebelow.loc[level_onebelow['single_code_level_below'].isin(already_filled['industry']),:].shape[0]} out of {level_onebelow.shape[0]}")
+        df = one_level_one_naics_code_below_filler_up(df, onebelowdf, level=ilvl)
+        #print(level_onebelow.head())
+        #raise Exception("stop")
+    for ilvl in [2,3,4,5]: #for each level fill the df codes below
+        #print(f"{ilvl} down")
+        df=one_level_one_naics_code_below_filler_down(df,onebelowdf,level=ilvl)
     return(df)
 
-def one_level_one_naics_code_below_filler(df,onebelowdf,level=2):
-    onelevelonebelow=onebelowdf.loc[onebelowdf["ind_level"]==level+1,:]
-    lwcode_indf = df["industry"].isin(onelevelonebelow["single_code_level_below"].tolist()).sum()
-    if lwcode_indf==0:
-        repdf=df.loc[df["industry"].isin(onelevelonebelow["formatted_code"].tolist())].copy()
-        repdf["agglvl_code"]=repdf["agglvl_code"]+1
-        for add_digit in list(onelevelonebelow["additional_digit"].unique()):
-            add_digit_indic=repdf["industry"].isin(onelevelonebelow.loc[onelevelonebelow["additional_digit"]==add_digit,"formatted_code"].tolist())
-            if level==2:
-                repdf.loc[add_digit_indic,"geoindkey"]=repdf.loc[add_digit_indic,'geoindkey'].str.replace("----",str(add_digit)+"///")
-                repdf.loc[add_digit_indic,"industry"]=repdf.loc[add_digit_indic,'industry'].str.replace("----",str(add_digit)+"///")
-            else:
-                repdf.loc[add_digit_indic,"geoindkey"] = repdf.loc[add_digit_indic,'geoindkey'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
-                repdf.loc[add_digit_indic,"industry"] = repdf.loc[add_digit_indic,'industry'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
-            for naics_col in [col for col in repdf.columns if "naics" in col.lower() and str(level+1) in col.lower()]:
-                repdf[naics_col]=repdf[naics_col].astype(str)
-                repdf.loc[add_digit_indic,naics_col]=repdf.loc[add_digit_indic,naics_col].str+str(add_digit)
-        df=pd.concat(df,repdf)
+#given a level. this function repeats rows of df when there is only 1 code below that level
+def one_level_one_naics_code_below_filler_up(df,onebelowdf,level=6):
+    onelevelonebelow=onebelowdf.loc[onebelowdf["ind_level"]==level,:].copy()
+    #get values already in df. change geoindkey to match the parent industry
+    already_filled = df.loc[
+        df['industry'].isin(onelevelonebelow['single_code_level_below']), ].copy()
+    onelevelonebelow.rename(columns={"formatted_code":"up_industry","single_code_level_below":"industry"},inplace=True)
+    already_filled=already_filled.merge(onelevelonebelow[['up_industry','industry']],on="industry",how='left')
+    already_filled.loc[already_filled['up_industry'].notna(),'industry']=already_filled.loc[already_filled['up_industry'].notna(),'up_industry']
+    already_filled.drop(columns=['up_industry','agglvl_code','ind_level'],inplace=True,errors='ignore')
+    if 'geography' not in already_filled.columns:
+        already_filled['geography']=already_filled['geoindkey'].astype(str).str.split("_")[0]
+    already_filled['geoindkey']=already_filled['geography'].astype(str)+"_"+already_filled['industry'].astype(str)
+    df_i=df.set_index('geoindkey')
+    already_filled_i=already_filled.set_index('geoindkey')
+    df=df_i.combine_first(already_filled_i).reset_index()
+    #print(df.loc[
+    #          ~df['geoindkey'].isin(df_i.reset_index()['geoindkey'].tolist()), ['geoindkey', 'agglvl_code', 'estnum', 'emp1',
+    #                                                                   'emp2', 'emp3', 'wages_qcew',
+    #                                                                   'wages_cbp']].sort_values(by="geoindkey").head())
+
     return df
 
 
 
+#given a level. this function repeats rows of df when there is only 1 code below that level
+def one_level_one_naics_code_below_filler_down(df,onebelowdf,level=2):
+    onelevelonebelow=onebelowdf.loc[onebelowdf["ind_level"]==level+1,:]
+    if 'ind_level' not in df.columns:
+        df['ind_level']=df['agglvl_code'].astype(float)-72
+    #get data match the parent code, adjust it to be from the child code
+    to_possibly_fill=df.loc[(df['ind_level']==level)&(df['industry'].isin(onelevelonebelow['formatted_code'])),:].copy()
+    to_possibly_fill['ind_level'] = to_possibly_fill['ind_level'] + 1
+    to_possibly_fill['agglvl_code'] = to_possibly_fill['agglvl_code'].astype(int) + 1
+    cols_for_merge=['agglvl_code','ind_level','industry','geography','geoindkey']
+    for add_digit in list(onelevelonebelow["additional_digit"].unique()):
+        add_digit_indic = to_possibly_fill["industry"].isin(
+            onelevelonebelow.loc[onelevelonebelow["additional_digit"] == add_digit, "formatted_code"].tolist())
+        if level == 2:
+            to_possibly_fill.loc[add_digit_indic, "geoindkey"] = to_possibly_fill.loc[add_digit_indic, 'geoindkey'].str.replace("----",
+                                                                                                          str(add_digit) + "///")
+            to_possibly_fill.loc[add_digit_indic, "industry"] = to_possibly_fill.loc[add_digit_indic, 'industry'].str.replace("----",
+                                                                                                        str(add_digit) + "///")
+        else:
+            to_possibly_fill.loc[add_digit_indic, "geoindkey"] = to_possibly_fill.loc[add_digit_indic, 'geoindkey'].str.replace(
+                "/" * (6 - level), str(add_digit) + ("/" * (5 - level)))
+            to_possibly_fill.loc[add_digit_indic, "industry"] = to_possibly_fill.loc[add_digit_indic, 'industry'].str.replace(
+                "/" * (6 - level), str(add_digit) + ("/" * (5 - level)))
 
+    #merge possible fill with data
+    df_joined=df.merge(to_possibly_fill,on=cols_for_merge,how='outer',suffixes=('','_possible_fill'))
+    #fill relevant columns
+    cols_to_fill=[col for col in to_possibly_fill.columns if col in df.columns and col not in cols_for_merge and "naics" not in col.lower()]
+    for col in cols_to_fill:
+        df_joined[col] = df_joined[col].fillna(df_joined[f'{col}_possible_fill'])
+    df_joined.drop(columns=[col for col in df_joined.columns if col.endswith('_possible_fill')])
+    #print(df.loc[df['industry'].isin(onelevelonebelow['single_code_level_below'].tolist()),['geoindkey','agglvl_code','estnum','emp1','emp2','emp3','wages_qcew','wages_cbp']].sort_values(by="geoindkey").head())
+    #print(df_joined.loc[~df_joined['geoindkey'].isin(df['geoindkey'].tolist()),['geoindkey','agglvl_code','estnum','emp1','emp2','emp3','wages_qcew','wages_cbp']].sort_values(by="geoindkey").head())
+
+    # raise Exception('stop')
+    # if lwcode_indf==0:
+    #     repdf=df.loc[df["industry"].isin(onelevelonebelow["formatted_code"].tolist())].copy()
+    #     repdf["agglvl_code"]=repdf["agglvl_code"]+1
+    #     for add_digit in list(onelevelonebelow["additional_digit"].unique()):
+    #         add_digit_indic=repdf["industry"].isin(onelevelonebelow.loc[onelevelonebelow["additional_digit"]==add_digit,"formatted_code"].tolist())
+    #         if level==2:
+    #             repdf.loc[add_digit_indic,"geoindkey"]=repdf.loc[add_digit_indic,'geoindkey'].str.replace("----",str(add_digit)+"///")
+    #             repdf.loc[add_digit_indic,"industry"]=repdf.loc[add_digit_indic,'industry'].str.replace("----",str(add_digit)+"///")
+    #         else:
+    #             repdf.loc[add_digit_indic,"geoindkey"] = repdf.loc[add_digit_indic,'geoindkey'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
+    #             repdf.loc[add_digit_indic,"industry"] = repdf.loc[add_digit_indic,'industry'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
+    #         for naics_col in [col for col in repdf.columns if "naics" in col.lower() and str(level+1) in col.lower()]:
+    #             repdf[naics_col]=repdf[naics_col].astype(str)
+    #             repdf.loc[add_digit_indic,naics_col]=repdf.loc[add_digit_indic,naics_col].str+str(add_digit)
+    #     df=pd.concat(df,repdf)
+    return df
+
+
+
+## takes in naics string for filename and location "codes_file"
+# where code_col is numeric value for where the naics codes are and code_sep is the seperator for columns
+# it returns a dataframe with a row for each naics code at any level and columns:
+#       ind_level: industry level for code in 'naics' column
+#       naics: numeric naics code
+#       naics6: repeats 'naics' entry but used for loops in further processing
+#       formatted_code: is the 'naics' code formatted to match the format of the goeindkey industry code portion
+#       naics5, naics4, naics3, naics2: are numeric codes for the 5,4,3, and 2 prefix of 'naics'. If 'naics' is shorter than the level, then it just has the 'naics' code
+#       dashed_naics2: indicator that the 'naics' code is a part of one of the dashed 2-digit naics groupings. (i.e. 31-33)
 def process_naics_file(code_file,code_col=1,code_sep=','):
     codedf = pd.read_csv(code_file, sep=code_sep)
     if code_col in codedf.columns:
@@ -419,16 +560,18 @@ def geo2naics_dash_handler(data,naicsdata=None):
 
 
 
-#with open('config_pre2017.yaml', 'r') as configFile:
-#     config = yaml.safe_load(configFile)
-#preprocessConfig = config['preprocessConfig']
-#generalConfig = config['generalConfig']
-#foldername = preprocessConfig['DATA_IN_FOLDER']
-#
-#dftemp=pd.read_csv("DataDiag/PythonPreprocessOut/combine_data_1208.csv")
-#dftemp=dftemp.iloc[:,1:]
-#print(dftemp.columns)
-#naicsdf=process_naics_file(generalConfig['NAICS_FILE'])
-#temp=one_naics_code_below_filler(dftemp,naicsdf)
-#print(temp.head())
-#print(temp.columns)
+# with open('config_pre2017.yaml', 'r') as configFile:
+#      config = yaml.safe_load(configFile)
+# preprocessConfig = config['preprocessConfig']
+# generalConfig = config['generalConfig']
+# foldername = preprocessConfig['DATA_IN_FOLDER']
+# #
+# dftemp=pd.read_csv("DataDiag/PythonPreprocessOut/combine_data_1208.csv")
+# dftemp=dftemp.iloc[:,1:]
+# #print(dftemp.columns)
+# naicsdf=process_naics_file(generalConfig['NAICS_FILE'])
+# print("start filler")
+# temp=one_naics_code_below_filler(dftemp,naicsdf)
+# print("end filler")
+# #print(temp.head())
+# #print(temp.columns)

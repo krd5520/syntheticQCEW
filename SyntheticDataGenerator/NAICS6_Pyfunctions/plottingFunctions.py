@@ -39,10 +39,13 @@ def save_diagnostic_plots(model,title,filename):
     axes[1].set_title("Fitted vs. Residuals")
 
     ## Observed vs Fitted
-    coef = np.polyfit(fitted, ycol, 1) # Best-fit line
-    poly = np.poly1d(coef)
     axes[2].scatter(fitted, ycol, alpha=0.6, label="Data")
-    axes[2].plot(fitted, poly(fitted), linewidth=2, label="Best-fit line")
+    try:
+        coef = np.polyfit(fitted, ycol, 1) # Best-fit line
+        poly = np.poly1d(coef)
+        axes[2].plot(fitted, poly(fitted), linewidth=2, label="Best-fit line")
+    except:
+        print("Could not fit 'best fit line' for observed verses fitted plot.")
     min_val = min(ycol.min(), fitted.min())     # 45-degree perfect-fit line
     max_val = max(ycol.max(), fitted.max())
     axes[2].plot([min_val, max_val], [min_val, max_val], linestyle="--", label="Ideal fit")

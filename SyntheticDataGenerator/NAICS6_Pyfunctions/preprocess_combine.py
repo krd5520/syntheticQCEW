@@ -772,6 +772,8 @@ def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocess
 def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustforsource_estnum=True,naicsdf=None,base_data="cbp"):
     melddf=df.copy()
 
+
+
     if generalConfig['QTR']!=1:
         print("Adjusting the values of CBP to match quarter "+str(generalConfig["QTR"]))
         melddf = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=quarterConfig,

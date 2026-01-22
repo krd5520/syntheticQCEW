@@ -54,7 +54,7 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
 
 
     #df4,df6,df=adjust_negative_diff(df4=df4,df=df)
-    print(f"Num na in emp1 at countyXnaics6 level {df6['emp1'].isna().sum()}")
+    #print(f"Num na in emp1 at countyXnaics6 level {df6['emp1'].isna().sum()}")
     #get countyXnaics6 within countyXnaics4 summary information
     for vname in ["emp1", "wages"]:
         count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable=vname)
@@ -151,11 +151,12 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
         adjust_onlyqcew=True
     else:
         adjust_onlyqcew = False
+
+    print("Adjusting County by NAICS-4 Employment Values")
     adjustdf = adjust_geo4naics_varvalues(fitdf=df4, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp1",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
     adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp2",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
-    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp3",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
+    #adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp3",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
     adjustdf['m1empFromModel']=empMat['m1empFromModel']
-
     adjustdf = adjustdf.apply(lambda col: pd.to_numeric(col, errors='coerce') if col.name in ['emp1','emp2','emp3','wages'] else col)
 
     #adjustm1emp = adjust_countytotal_qwi(valdf=adjustdf, sumdf=df[df["industry"] == "------"])
@@ -163,13 +164,12 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
     #adjustdf=df4
     #empMatA = adjustdf[
     #    ['geoindkey', 'emp1', 'emp2', 'emp3', 'emp1_source', 'emp2_source', 'emp3_source', 'm1empFromModel']].copy()
-
     del empMat, adjustdf#, adjustm1emp
 
     prewagemodel=df4.merge(empMatA,on=["geoindkey"],how="left",suffixes=["_wdf",""])
     prewagemodel.loc[(prewagemodel['emp2'].notna())&(prewagemodel['emp2_source'].isna()),'emp2_source']="noise_impute"
     prewagemodel.loc[(prewagemodel['emp2'].notna())&(prewagemodel['emp2_source'].isna()),'emp2_source']="noise_impute"
-    prewagemodel.to_csv("DataDiag/PythonPreprocessOut/prewagemodel.csv")
+
     prewagemodel.drop(columns=[dropcol for dropcol in prewagemodel.columns if "_wdf" in dropcol], errors="ignore", inplace=True)
     prewagemodel.drop(columns=["minemp1","minemp1_source"], errors="ignore", inplace=True)
 
@@ -189,13 +189,8 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
             print(f"{key}: {value}")
         # Step 1. Create wage prediction model
         print('---------- Imputing Wage Data ----------')
-        #df4,df6=adjust_negative_diff_vname(prewagemodel,df6,df,vname="wages")
         negdiff = (prewagemodel["wagesdiff"] < 0)
         source_notqcew = (prewagemodel['wages_source'] != "qcew")
-
-        ## When wagesdiff is negative...
-        # CASE 1: if there are missing county by NAICS-6 cells, and the county by NAICS-4 wages source is not "qcew",
-        # then override wages, wages_source, and wagesdiff to be NA
 
         prewagemodel.loc[(negdiff) & (prewagemodel["wages_missing6by4"] > 0) &(source_notqcew), "wages"] = np.nan
         prewagemodel.loc[(negdiff) & (prewagemodel["wages_missing6by4"] > 0)&(source_notqcew), "wages_source"] = np.nan
@@ -208,15 +203,7 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
         prewagemodel.loc[(negdiff) & (prewagemodel["wages_missing6by4"] == 0)&(source_notqcew), "wages_source"] = "sum6by4"
         # CASE 3: if there wages_source is qcew, must adjust county by NAICS-6 cbp values
 
-        #count6digwages = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="wages")
 
-        #checkdf4 = prewagemodel.merge(count6digwages, on=['geo4naics'], how='left', indicator=False, suffixes=["_old",""])
-        #checkdf4.drop(columns=[dropcol for dropcol in checkdf4.columns if "_droplater" in dropcol], errors="ignore",
-        #              inplace=True)
-        ### Get difference between county by NAICS4 and sum of known county by NAICS6
-        #checkdf4["wagesdiff"] = checkdf4["wages"].astype(float) - checkdf4['wages_sum6by4'].astype(float)
-        #print("check df4 describe (per wage fitting)")
-        #print(checkdf4[['wages','wagesdiff',"wages_sum6by4","wages_missing6by4"]].describe())
         wagefit_sub = get_wages_model(df=prewagemodel, emp_mat_adj=empMatA,wageConfig=wageConfig)
         # Step 2. Get min/max bounds
     else:
@@ -224,25 +211,11 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
         print('---------- Imputing Wage Data (if needed) ----------')
         wagefit_sub=None
     wages_maxmin=get_varmaxmindf(df4dig=df4, fulldf=df, variable="wages", onlyqcew=False)
-    #print(f"when shape of data when min>max {wages_maxmin.loc[wages_maxmin['minwages']>wages_maxmin['maxwages'],:].shape}")
-    #print(
-    #    f"{wages_maxmin.loc[wages_maxmin['minwages'] > wages_maxmin['maxwages'], :].head()}")
 
-    #print(f"maxwages below 0\n {wages_maxmin.loc[wages_maxmin['maxwages']<0,'maxwages_source'].value_counts()}")
     wages_maxmin.loc[wages_maxmin["maxwages"]<0,"maxwages"]=wages_maxmin['maxwages'].max()
-    #wages_maxmin = get_maxmindf(df4dig=df4, fulldf=df, emp_mat_adj=empMatA)
-    # Prepare employment matrix
-    empMatwage = empMatA[["geoindkey","emp1","emp2","emp3"]]
-    #pd.DataFrame({
-    #    "geoindkey"
-    #    "emp1": empMatA.loc[:, "emp1"],
-    #    "emp2": empMatA.iloc[:, "emp2"],
-    #    "emp3": empMatA.iloc[:, ]
-    #})
 
     # Step 3: Impute wage values
     wagesout = get_wages4(df4=df4, wagemodel=wagefit_sub, useEarnQWI=use_QWI_for_wages, maxmindf=wages_maxmin,count6digdf=count6dig)
-    print("here 3.5")
     # Prepare final 4 digit output
     df4imp = wagesout.copy().assign(
         #EmpScale=lambda x: np.where(x['m3emp'] == 0, 1, x['emp'] / x['m3emp'].astype(float)),
@@ -251,18 +224,19 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
     )
 
 
+
+
     df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
     df6['geo4naics'] = df6['geoindkey'].str[:-2]
     df6['geo5naics'] = df6['geoindkey'].str[:-1]
     df6.loc[df6['wages_source']!="qcew","wages"]=np.nan
-    count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum",onlyQCEW=False)
+    count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum",onlyQCEW=False,include_estab_emp3_stats=False)
 
-    #check agreement
-    checkdf=prewagemodel.loc[prewagemodel["agglvl_code"]==76,:].merge(count6dig,on="geo4naics",how="left",indicator=False,suffixes=["_df4","_codesummary"])
-    print(checkdf.columns)
-    checkdf['estnumdiff']=checkdf['estnum']-checkdf['estnum_sum6by4']
-    baddf=checkdf.loc[checkdf['estnumdiff']!=0,['geoindkey','estnum','estnum_sum6by4','count6by4codes_codesummary']]
-    print(f"checking estnum aggreement between countyXnaics4 and naics6. {baddf.shape[0]} problem countyXnaics4 codes out of {checkdf.shape[0]}. \n{baddf.head()}")
+
+    df6.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df6.csv")
+    df4imp.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df4imp.csv")
+    count6dig.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_count6dig.csv")
+
     ################## Get NAICS6 By County Aggregates #######################
     print('---------- Getting NAICS6 by County Aggregates ----------')
     print('This may take a while, please be patient...')

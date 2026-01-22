@@ -352,11 +352,14 @@ def subset_model_data(data,formula_str):
             pass
             #if data[cvar].astype(str).str.isnumeric().any():
             #    data[cvar]=data[cvar].astype(float)
-    print(list(checkvars))
-    print(data.columns)
-    print(data.shape[0])
+    #print(list(checkvars))
+    #print(data.columns)
+    #print(data.shape[0])
     data=data.loc[:,list(checkvars)].copy()
-    print(data.head())
+    #print(data.head())
+    outdf=data[data.notna().all(axis=1)]
+    print(outdf.shape[0])
+    #print(outdf.head())
     return data[data.notna().all(axis=1)]
 
 
@@ -392,15 +395,23 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicol
     # Retrieve OLS formula from config.yaml
     formula=formula_str
     Config={'COOKS_THRESH':cooks_thresh,'OUTLIER_THRESH':studentresid_thresh,'DIAGNOSTIC_PLOTS':diagnostic_plots}
-    print("data head before subset")
-    print(data.head())
+
     subdf = subset_model_data(data,formula_str)
-    print(subdf.head())
+
     # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
     # and perform initial model fitting
 
     y_pre, X_pre = Formula(formula).get_model_matrix(subdf)
+    # corrmat=X_pre.corr()
+    # for cname in corrmat.columns:
+    #     corrvals=np.abs(corrmat[cname])
+    #     highcorr=corrmat.loc[corrvals>=0.75,]
+    #     if highcorr.shape[0]>0:
+    #         #toprint=highcorr.apply(lambda  row:f"{row.name} ({row[cname]})")
+    #         print(f'{cname}: high correlation with {[rname for rname in highcorr.index.values if rname!="Intercept" and rname!=cname]} ({highcorr[cname].values})')
+    # print(f'X_pre head is \n{X_pre.head()}\n and describe is\n{X_pre.describe()}\n and Y_pre head is\n{y_pre.head()}')
     model_pre = sm.OLS(y_pre, X_pre).fit()
+    #print(f'model before outlier handling \n {model_pre.summary()}')
 
     # Calculate Cook's distance for each observation
     influence = OLSInfluence(model_pre)

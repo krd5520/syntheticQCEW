@@ -251,7 +251,7 @@ def adjust_wagevalues(fitwagedf, dfmaxmin,count6dig=None,minonly=True):
 
     maxmindf = dfmaxmin[['geo4naics', 'minwages', 'maxwages']].copy()
     fitwagedf = fitwagedf.merge(maxmindf, on='geo4naics', how='left')
-    print(fitwagedf[['geoindkey','wages','minwages','maxwages','avg_month_emp_wages','emp3','wages_source','usewageModel']].head())
+    #print(fitwagedf[['geoindkey','wages','minwages','maxwages','avg_month_emp_wages','emp3','wages_source','usewageModel']].head())
     if minonly:
         fitwagedf['wages'] = fitwagedf['wages'].clip(
             lower=fitwagedf['minwages'].astype(float)
@@ -283,6 +283,7 @@ def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=Non
     '''
     # First try using CBP data
     #print(df4['wages_source'].value_counts(dropna=False))
+    #get only 1 missing
 
     wages_Available = df4['wages'].notna()
     #print(f'wgaes_Available shape {wages_Available.shape}')
@@ -293,7 +294,6 @@ def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=Non
     if useEarnQWI:
         print("Number which uses QWI:", end=" ")
         print(df4['avg_month_emp_wages'].isna().value_counts(dropna=False))
-        print(sum(df4["avg_month_emp_wages"].isna()))
         EarnBegAvailable = df4['avg_month_emp_wages'].notna()
         #print(f'sum EarnBegAvailiable {sum(EarnBegAvailable)}')
         useQWI = (EarnBegAvailable) & (~wages_Available)
@@ -307,14 +307,6 @@ def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=Non
         print("Number of wage county by NAICS-4 cells which use Model:", sum(useModel))
         predicted_wages = wagesFromModel(df4[useModel], wagemodel,formula_str=formula_str)
 
-        response = wagemodel.model.endog_names
-        if "np.sqrt" in response:
-            predicted_wages = predicted_wages ** 2
-        elif "np.log" in response:
-            predicted_wages = np.exp(predicted_wages)
-
-        if "wagesdiff" in response:
-            predicted_wages = predicted_wages + df4.loc[useModel, 'wages_sum6by4'].values
 
         #print(f"shape of predicted_wages {predicted_wages.shape}")
         df4.loc[useModel,"wages"]=predicted_wages

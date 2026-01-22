@@ -47,25 +47,34 @@ def get_m1emp_model(df,employmentConfig):
 
     df=df.copy()
     if "DIAGNOSTIC_PLOTS" in employmentConfig:
-        diagplots=employmentConfig['DIAGNOSTIC_PLOTS']
+        diagplot = employmentConfig['DIAGNOSTIC_PLOTS']
     else:
-        diagplots=None
+        diagplot = None
 
     if "emp1diff" in employmentConfig['OLS_FORMULA']:
-        print(df[["agglvl_code","emp1diff","emp1_missing6by4"]].head())
-        print(df.describe())
-        modeldf=df.loc[(df['emp1_missing6by4']>0),:]
-        #modeldf=modeldf.loc[(modeldf['emp1diff']>0)&(modeldf['emp3']>=0),:]
+        if employmentConfig['OLS_FORMULA'].startswith("np.log") or employmentConfig['OLS_FORMULA'].startswith("np.sqrt"):
+            model = get_model(df.loc[(df['emp1_missing6by4'] > 0)&(df['emp1diff']>0), :], employmentConfig['OLS_FORMULA'],
+                              employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'],
+                              diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
+                              return_summary_and_diagnostics=False)
+        else:
+            model = get_model(df.loc[df['emp1_missing6by4']>0,:], employmentConfig['OLS_FORMULA'], employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'],
+                          diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
+                          return_summary_and_diagnostics=False)
     else:
-        modeldf=df
-    print(employmentConfig['OLS_FORMULA'])
-    print(modeldf.columns)
-    print("modeldf head")
-    print(modeldf.head())
-    print(f"num na emp3 {modeldf['emp3'].isna().sum()} modeldf shape {modeldf.shape[0]}")
-    model = get_model(modeldf,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
+        model=get_model(df, employmentConfig['OLS_FORMULA'], employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,include_multicolinearity=True,
+                  return_summary_and_diagnostics=False)
     print(model.summary())
-    # end. return fitted model.
+
+
+    # if "emp1diff" in employmentConfig['OLS_FORMULA']:
+    #     modeldf=df.loc[(df['emp1_missing6by4']>0),:]
+    #     #modeldf=modeldf.loc[(modeldf['emp1diff']>0)&(modeldf['emp3']>=0),:]
+    # else:
+    #     modeldf=df
+    # model = get_model(modeldf,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
+    # print(model.summary())
+    # # end. return fitted model.
     return model
 
 def check_lwbd_emp_qwi(empvals, stablevals):
@@ -142,6 +151,10 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
 
     # Identify rows to be imputed
     missm1indicator = df["emp1"].isna()
+    if 'estnum_emp1_missing6by4' in df.columns:
+        nomissingestnum=(df['estnum_emp1_missing6by4']==0)
+        df.loc[(missm1indicator)&(nomissingestnum),'emp1']=df.loc[(missm1indicator)&(nomissingestnum),'emp1_sum6by4']
+        missm1indicator = df["emp1"].isna()
 
     missingsub = df[missm1indicator]
     # Get model predictions and standard errors for missing values
