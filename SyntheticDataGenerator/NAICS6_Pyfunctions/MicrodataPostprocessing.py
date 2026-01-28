@@ -173,7 +173,7 @@ def combine_and_split_iterative(generalConfig, microdataConfig,filebasename="Syn
                 else:
                     subdata.to_csv(file_path, mode='w', header=True, index=False)
                 print(f"Appended data for {abbr}{fips_code} from {file} to {file_path}")
-        
+
     
     # Combine all the data from the final_data list into a single DataFrame
     final_df = pd.concat(final_data, ignore_index=True)

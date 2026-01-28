@@ -67,6 +67,28 @@ To use the synthetic data generator follow these steps:
 	  2. Extract the the archive using `7z`
 	  3. Locate the imputed data csv file in the archive `Final_Imputed/efsy_cbp_2016.csv`
 	  4. Place the extracted csv file in the `ImputeCBP/` directory specified in `config.yaml
+
+3. Download other data files
+  
+  1. Download a csv file with the first column as the 5 digit state and county FIPS code.
+      * Such a file can be found at https://www.bls.gov/cew/classifications/areas/qcew-area-titles.htm
+      * The location of this file and its name should be used as the input for 'FULL_FIPS_FILE' under 'generalConfig' in the configuration file.
+      * This file is **ONLY** used to automate the download of the QCEW and is not needed otherwise.
+  2. Download a csv file which has the 6-digit NAICS as the second column and includes "naics_sector", "domain", and "super_sector". 
+      * Such a file can be found at https://www.bls.gov/cew/classifications/industry/industry-supersectors.htm but may require some preprocessing.
+      * The location of this file and its name should be used as the input for 'BLS_NAICS_CROSSWALK' under 'generalConfig' in the configuration file.
+      * This file allows the use of BLS classifications such as super-sector and domain in the imputation models and includes these classifications in the final file output.
+  3. Download a csv where the second column is of all 2-, 3-, 4-, 5-, and 6-digit NAICS codes including the NAICS-2 codes which are grouped, such as 31-33.
+      * Such a file can be found at https://www.naics.com/search/ under 'Historical NAICS Reference Files'
+      * The location of this file and its name should be used as the input for 'NAICS_FILE' under 'generalConfig' in the configuration file.
+      * This file is primarily used to deal with the grouped NAICS-2 codes that appear with dashes. If it is not provided, the 2012 versions will be used as default.
+      * Make sure to get the historical reference file that corresponds to a year that is the same as your generalConfig "YEAR" input or is before that year.
+  4. Download a csv with the first column as the 2-digit FIPS state code, the second column as the state name, and the third as the state abbreviation. 
+      * The first two columns can be downloaded from https://transition.fcc.gov/oet/info/maps/census/fips/fips.txt. The state abbreviations can be added manually to the file.
+      * The location of this file and its name should be used as the input for 'FIPS_STATE_FILE' under 'generalConfig' in the configuration file.
+      * Throughout the code, the default is set to be the 2010 state fips codes. 
+
+
 	
 ### Changing parameters and model formulas
 Change parameters and models defined in `config.yaml` to suit your needs
