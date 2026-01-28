@@ -99,6 +99,7 @@ def get_m1emp6_per4(df6n,df4n,rseed=None):
             print(f"Remainders: emp1 {float(remain_emp1)} Codes: {codes}")
             print(f'Head of df4n\n {df4n[["geoindkey","minemp1","minemp1_source","emp1","emp1_source"]].head()}')
             print(f'Head of df6n\n {df6n[["geoindkey","minemp1","minemp1_source","emp1","emp1_source"]].head()}')
+            raise Exception("There are negative remainders. This shouldn't happen. Check to see if your model is predicting reasonable numbers.")
     # subdf6['wages'] = subdf6['q'] # Start with known values
     unknown_indic = (df6n['emp1'].isna())
     # Distribute remaining wage to suppressed entries
@@ -174,11 +175,7 @@ def get_6naics_per4(naics4dig,df6,df4imp,rseed=None):
         subdf6wage['emp3'] = np.nan
         subdf6wage['wages'] = np.nan
     else:
-        if subdf6emp['emp1'].isna().sum()>0:
-            print("in get_6naics_per4")
-            print(subdf6emp[['agglvl_code','geoindkey','emp1','estnum']].head())
-            print(subdf4[['agglvl_code','geoindkey','emp1','estnum']].head())
-        subdf6wage = get_wage6_per4(subdf6=subdf6emp,subdf4=subdf4)
+       subdf6wage = get_wage6_per4(subdf6=subdf6emp,subdf4=subdf4)
     # Cleanup before returning
     #subdf6wage = subdf6wage.drop(columns=['qp1', 'qp1_nf', 'emp', 'geo5naics'],errors="ignore")
     return subdf6wage
@@ -206,12 +203,15 @@ def get_6naics_all(df, df4n, codes4summary, rseed=None,keepqcew=True):
         .merge(df4forjoin, on='geo4naics', how='inner',suffixes=["_naics6",""])
     )
     ## Check agreement
-    check_diff_emp3=df6_onecodeper4['emp3']-df6_onecodeper4['emp3_naics6']
-    check_diff_wages=df6_onecodeper4['wages']-df6_onecodeper4['wages_naics6']
-    check_diff_wages[df6_onecodeper4['wages_naics6'].isna()]=0
-    check_diff=check_diff_emp3+check_diff_wages
-    if check_diff.round(0).sum()!=0:
-        print(f"checking agreement on countyXnaics4 and countyXnaics6 when there is only 1 naics6 code in the naics4\n{df6_onecodeper4.loc[check_diff.round(0)!=0,['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum','estnum_naics6', 'emp1','emp1_naics6','emp2','emp2_naics6', 'emp3','emp3_naics6', 'wages','wages_naics6']].head()}")
+    # check_diff_emp3=df6_onecodeper4['emp3']-df6_onecodeper4['emp3_naics6']
+    #check_diff_wages=df6_onecodeper4['wages']-df6_onecodeper4['wages_naics6']
+    #check_diff_wages[df6_onecodeper4['wages_naics6'].isna()]=0
+    #check_diff=check_diff_emp3+check_diff_wages
+    #if check_diff.round(0).sum()!=0:
+    #    df6_onecodeper4.loc[(check_diff.round(0) != 0), ['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum',
+    #                                                     'estnum_naics6', 'emp1', 'emp1_naics6', 'emp2', 'emp2_naics6',
+    #                                                     'emp3', 'emp3_naics6', 'wages', 'wages_naics6']].head()
+    #    print(f"checking agreement on countyXnaics4 and countyXnaics6 when there is only 1 naics6 code in the naics4\n{(df6_onecodeper4.loc[check_diff.round(0)!=0),['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum','estnum_naics6', 'emp1','emp1_naics6','emp2','emp2_naics6', 'emp3','emp3_naics6', 'wages','wages_naics6']].head()}")
     df6_onecodeper4=df6_onecodeper4[['geoindkey', 'geo4naics', 'state', 'cnty', 'estnum', 'emp1','emp2', 'emp3', 'wages']]
 
     ##Check all countyXnaics4 codes have countyXnaics6 subcodes

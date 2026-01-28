@@ -153,8 +153,8 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
         adjust_onlyqcew = False
 
     print("Adjusting County by NAICS-4 Employment Values")
-    adjustdf = adjust_geo4naics_varvalues(fitdf=df4, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp1",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
-    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp2",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=df4, dfmaxmin=None,  variable="emp1",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, variable="emp2",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
     #adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp3",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
     adjustdf['m1empFromModel']=empMat['m1empFromModel']
     adjustdf = adjustdf.apply(lambda col: pd.to_numeric(col, errors='coerce') if col.name in ['emp1','emp2','emp3','wages'] else col)
@@ -233,9 +233,9 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
     count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum",onlyQCEW=False,include_estab_emp3_stats=False)
 
 
-    df6.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df6.csv")
-    df4imp.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df4imp.csv")
-    count6dig.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_count6dig.csv")
+    # df6.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df6.csv")
+    # df4imp.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df4imp.csv")
+    # count6dig.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_count6dig.csv")
 
     ################## Get NAICS6 By County Aggregates #######################
     print('---------- Getting NAICS6 by County Aggregates ----------')
@@ -243,10 +243,13 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
     # Distribute values from 4-digit to 6-digit NAICS
     #print(f'df4imp head before get_6naics_all in generate_NAICS.py:\n{df4imp.head()}')
     naics6df = get_6naics_all(df6, df4imp, codes4summary=count6dig)
+
     #print(naics6df.columns)
     # Final formatting and output
-    naics6df = naics6df.iloc[:, :5].join(naics6df[['emp1', 'emp3', 'wages']])
-    naics6df.head(50)
+    naics6df = naics6df[["geoindkey","agglvl_code","year","qtr",
+                         "state","cnty","industry","estnum","domain",
+                         "supersector","emp1","emp2","emp3","wages","emp1_source","emp2_source","emp3_source","wages_source"]].copy()
+    #raise Exception("stop")
     naics6df.to_csv(str(generalConfig["NAICS6_FILE"]),index=False)
     return(naics6df)
 

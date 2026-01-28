@@ -16,9 +16,10 @@ def check_dir(dirname):
 def check_naics6_variables(naics6df,config,naics6file):
     print("Checking format of "+str(naics6file))
     ## Minimum variables
-    needvars=['estnum','wage','m1emp','m3emp',"geoindkey","state","cnty"]
+    needvars=['estnum','wages','emp1','emp3',"geoindkey","state","cnty"]
 
     naics6vars = naics6df.columns.tolist()
+    print(naics6vars)
     saveindicator=False
     if set(['state','cnty']).issubset(set(naics6vars)) or set(['fipstate','fipscty']).issubset(set(naics6vars)):
         if set(['fipstate','fipscty']).issubset(set(naics6vars)):
@@ -43,14 +44,14 @@ def check_naics6_variables(naics6df,config,naics6file):
         saveindicator=True
     naics6vars=naics6df.columns.tolist()
     if set(needvars).issubset(set(naics6vars)):
-        if "m2emp" in naics6vars or isinstance(config["M2EMP_NOISECOEF"],float):
+        if "emp2" in naics6vars or isinstance(config["EMP2_NOISECOEF"],float):
             check_microdataConfig(config,True)
             if saveindicator:
                 naics6df.to_csv(str(naics6file), sep=',', index=False)
         else:
-            raise Exception(f"Error: either microdataConfig missing a numeric M2EMP_NOISE or file "+str(naics6file)+" missing a m2emp column.")
+            raise Exception(f"Error: either microdataConfig missing a numeric EMP2_NOISE or file "+str(naics6file)+" missing a emp2 column.")
     else:
-        raise Exception(f"Error: file "+str(naics6file)+" does not have required column names: estnum, wage, m1emp, m3emp, geoindkey, state, cnty.")
+        raise Exception(f"Error: file "+str(naics6file)+" does not have required column names: estnum, wages, emp1, emp3, geoindkey, state, cnty.")
 
 
 def check_microdataConfig(config,m2emp_indicator=False):
@@ -69,7 +70,7 @@ def check_microdataConfig(config,m2emp_indicator=False):
     check_dir(config["OUTPATH"])
     assert "SUBSET_OUTPATH" in config, f"microdataConfig missing SUBSET_OUTPATH."
     check_dir(config["SUBSET_OUTPATH"])
-    assert "CROSSWALK" in config and os.path.exists(config["CROSSWALK"]) and os.path.isfile(config["CROSSWALK"]), f"microdataConfig missing CROSSWALK file or file cannot be located."
+#    assert "CROSSWALK" in config and os.path.exists(config["CROSSWALK"]) and os.path.isfile(config["CROSSWALK"]), f"microdataConfig missing CROSSWALK file or file cannot be located."
     #assert "FIPS_STATE_FILE" in config and os.path.exists(config["FIPS_STATE_FILE"]) and os.path.isfile(
     #    config["FIPS_STATE_FILE"]), f"microdataConfig missing FIPS_STATE_FILE file or file cannot be located."
 
@@ -85,13 +86,14 @@ def check_config(config_file):
     employmentConfig=None
     preprocessConfig=None
     supplementConfig=None
-    
+
     assert "microdataConfig" in config and isinstance(config['microdataConfig'],dict), f"Config file is missing microdataConfig."
     assert "generalConfig" in config and isinstance(config['generalConfig'],dict), f"Config file is missing generalConfig."
     generalConfig = config['generalConfig']
     microdataConfig = config['microdataConfig']
     if 'otherdataConfig' in config:
         supplementConfig=config['otherdataConfig']
+
     for val in ["YEAR","QTR","SEED"]:
         assert val in generalConfig and isinstance(generalConfig[val],int), f"generalConfig missing integer-valued "+str(val)+"."
     if "SKIP_TO_MICRODATA" in generalConfig and generalConfig["SKIP_TO_MICRODATA"]:
@@ -134,7 +136,7 @@ def check_config(config_file):
         elif "wageConfig"in config and isinstance(config['wageConfig'],dict):
             wageConfig = config['wageConfig']
 
-       
+
     return (generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementConfig)
 
         #check NAICS6 by county file exists

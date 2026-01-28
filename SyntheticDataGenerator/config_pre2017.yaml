@@ -4,13 +4,14 @@ generalConfig: ## This section is used generally throughout the process.
   YEAR: 2016 #year of the data
   QTR: 1 #quarter for the data
   STATES: ["AL","PA","NJ","RI","CA","IN","OH","NM"] #Optional to select a subset of states. 
-  SKIP_TO_MICRODATA: False #If FALSE, County by NAICS-6 data will be generated.
+  SKIP_TO_MICRODATA: TRUE #If FALSE, County by NAICS-6 data will be generated.
   COMBINED_DATA: "DataDiag/PythonPreprocessOut/combine_data.csv" 
   NAICS6_FILE: "DataDiag/NAICS6Data.csv" 
   FIPS_STATE_FILE: "DataDiag/FIPSstatecodename.txt" #comma-sep file of FIPS state codes and names
   FULL_FIPS_FILE: "DataDiag/FIPSareacode_full.csv" #optional to download QCEW data.
   NAICS_FILE: "DataDiag/2012_codes.csv"
-  BLS_NAICS_CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
+  BLS_NAICS_CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"     ## https://www.bls.gov/cew/classifications/industry/industry-supersectors.htm
+
 
 ## Suplementary data for combining for regressions
 otherdataConfig:
@@ -55,11 +56,10 @@ wageConfig:
 microdataConfig:
   ## Dirichlet Prior parameters:
   EST_SEED: 1 #This seed is for the microdata
-  M2EMP_NOISECOEF: 1.69
+  EMP2_NOISECOEF: 1.69
   GAM_SHAPE: 3 #10
   GAM_SCALE: 20 #200
   WAGE_MIN: 10
-  NUMCHUNK: 35 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
+  NUMCHUNK: 10 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
   SUBSET_OUTPATH: "DataDiag/PythonMicrodataSubsets/"
-  CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"
-  OUTPATH: "./FinalMicrodata"
+  OUTPATH: "FinalMicrodata"

@@ -34,13 +34,18 @@ def start(config):
     print('---------- -------- -------- -------- ----------')
     print('---------- Retrieving or Loading Data ----------')
     print('---------- -------- -------- -------- ----------')
-    if generalConfig["NAICS_FILE"] is not None:
+    if generalConfig.get("NAICS_FILE") is not None:
         naicsdf = process_naics_file(generalConfig["NAICS_FILE"], code_col=naics_file_code_col, code_sep=naics_file_sep)
     else:
         naicsdf = None
     if generalConfig["SKIP_TO_MICRODATA"] is not None and generalConfig["SKIP_TO_MICRODATA"]:
         print('Reading in NAICS6 by County data from '+str(generalConfig["NAICS6_FILE"]))
-        naics6df = pd.read_csv(str(generalConfig["NAICS6_FILE"]))  # , nrows=10000)
+        naics6df = pd.read_csv(str(generalConfig["NAICS6_FILE"]),
+                               dtype={"geoindkey":'str',"agglvl_code":'Int64','year':'Int64','qtr':'Int64','state':'Int64','cnty':'Int64',
+                                      'industry':'str','estnum':'Int64','domain':'str','supersector':'str',
+                                      'emp1':np.float64,'emp2':np.float64,'emp3':np.float64,'wages':np.float64,
+                                      'emp1_source':'str','emp2_source':'str','emp3_source':'str','wages_source':'str'}
+                               )  # , nrows=10000)
         readinData=time.time()-startime
     else:
         if os.path.exists(generalConfig['COMBINED_DATA']) and os.path.isfile(generalConfig['COMBINED_DATA']):
@@ -151,13 +156,13 @@ def start(config):
     print('This may take a while, please be patient...')
     print('---------- -------- -------- -------- ----------\n')
     print('---------- Microdata Configuration ----------')
-    startmicrodata=time.asctime()
+    startmicrodata=time.time()
     for key, value in microdataConfig.items():
         print(f"{key}: {value}")
 
     random.seed(microdataConfig['EST_SEED'])
-    tempdf = make_syn_microdata(naics6df, numchunk=microdataConfig['NUMCHUNK'],
-                                outfoldername=microdataConfig['OUTPATH'])
+
+    tempdf = make_syn_microdata(naics6df, microdataConfig=microdataConfig,naicsdata=naicsdf)
     microdatatime=time.time()-startmicrodata
 
 
@@ -166,7 +171,7 @@ def start(config):
     print('---------- Generating Final Microdata ----------')
 
 
-    combine_and_split_iterative(yr=generalConfig['YEAR'], qtr=generalConfig['QTR'])
+    combine_and_split_iterative(generalConfig=generalConfig,microdataConfig=microdataConfig,naicsdata=naicsdf)
     postprocessstime=time.time()-postprocessstart
     finaltime=time.time()-startime
     print('\n---------- -------- -------- -------- ----------')

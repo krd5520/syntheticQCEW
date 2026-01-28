@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import scipy.stats
 from sklearn.preprocessing import PolynomialFeatures
 from statsmodels.stats.outliers_influence import OLSInfluence, variance_inflation_factor
 from formulaic import Formula
@@ -276,7 +277,7 @@ def custom_predict(data, ols_model,rseed=None):
             #X.drop(index_to_remove,inplace=True)
         else:
             X[feature]=transform_feature(feature,df)
-            featurena = np.isnan(X[feature])
+            #featurena = np.isnan(X[feature])
             #index_to_remove = [idx for idx, nabool in zip(X.index.tolist(), featurena) if not nabool]
             #X.drop(index_to_remove, inplace=True)
 
@@ -475,8 +476,10 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
         np.random.seed(rseed)
     # Get Dirichlet parameters based on m3emp distribution
     if len(params) > 1:  # Multiple parameters
-        #print(params)
+        print(len(params))
+        print(params)
         checknonneg=params<0
+        print(checknonneg.sum())
         if checknonneg.sum()>0:
             raise Exception(f"Parameters must be non-negative: {params}")
         checkpos=params>0
@@ -484,15 +487,23 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
             params=[1]*len(params)
         else:
             minnonzero=min(params[params>0])
-            if minnonzero<1 and param_lb<1: #make sure lower bound is much lower than minnonzero
-                params=[param_lb*minnonzero if x==0 else x for x in params] #change zeros to small values
-            elif param_lb<minnonzero:
-                params = [param_lb if x == 0 else x for x in params]
-            elif param_lb<1:
-                params=[param_lb*minnonzero if x==0 else x for x in params] #change zeros to small values
-            else:
-                raise Exception(f"parameter lower bound 'param_lb'={param_lb} should be <1 or < minimum non-zero 'param' value ({minnonzero}).")
-        rprops = np.random.dirichlet(params, size=size)
+            paramszeros_indic=(params==0).astype(int)
+            print(paramszeros_indic)
+            if paramszeros_indic.sum()>0:
+                if minnonzero<1 and param_lb<1: #make sure lower bound is much lower than minnonzero
+                    params[paramszeros_indic]=param_lb*minnonzero# if x==0 else x for x in params] #change zeros to small values
+                elif param_lb<minnonzero:
+                    params[paramszeros_indic] = param_lb# if x == 0 else x for x in params]
+                elif param_lb<1:
+                    params[paramszeros_indic]=param_lb*minnonzero# if x==0 else x for x in params] #change zeros to small values
+                #params=[param_lb*minnonzero if x==0 else x for x in params] #change zeros to small values
+                else:
+                    raise Exception(f"parameter lower bound 'param_lb'={param_lb} should be <1 or < minimum non-zero 'param' value ({minnonzero}).")
+        print(params)
+        if isinstance(params,np.ndarray) and len(params)>1:
+            rprops=scipy.stats.dirichlet.rvs(params,size=size)
+        else:
+            rprops = np.random.dirichlet(params, size=size)
         # Split the m1emp value proportionally using rprops
         return np.round(rprops.flatten() * total).astype(float)
     else:
@@ -589,3 +600,5 @@ def write_pipe_table(df, filename,include_index=True):
         if file_exists:
             f.write("\n")  # add blank row before appending
         f.write(table_text)
+
+

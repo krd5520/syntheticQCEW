@@ -2,8 +2,23 @@ import numpy as np
 import pandas as pd
 import os
 import yaml
+from typing import Optional, Tuple, List, Dict
 
-## Functions used to navigate the hierarchical nature of both the geographic and industry features of the geoindkey identifier
+
+"""
+Geographic and Industry Hierarchy Functions
+
+This module provides utilities for working with the geoindkey identifier system, which encodes
+both geographic (state/county FIPS codes) and industry (NAICS codes) information in a single
+composite key. Functions handle parsing, aggregation, and validation of these hierarchical
+relationships across different geographic and industry levels.
+
+The geoindkey format is: [geography]_[industry]
+  - geography: State code (2 digits) + County code (3 digits, zero-padded)
+  - industry: NAICS code (2-6 digits) padded with "-" or "/" for aggregation levels
+"""
+
+
 
 ## takes CBP format of fips state and county codes as 2 columns to
 ## the QWI format of [state code] + [3 characters: leading zeros and county code]
@@ -16,61 +31,54 @@ def fips_to_geography(df):
     df['fipscty'] = df['fipscty'].str.zfill(3)
     return(df['fipstate'] + df['fipscty'])
 
-## NOT CURRENTLY USED
-def get_state_totals_emp(df):
-    #subset to only necessary columns
-    dfsub = df[['state','emp','industry','estnum']]
-    #group by state and industry code
-    dfsub.groupby(['state','industry']).sum()
-    # make indentifying key
-    dfsub['geoindkey'] = dfsub['state']+"_"+dfsub['industry']
-    #unify column names
-    dfsub['cnty'] = "---"
-    dfsub['geography'] = dfsub['state']
-    dfsub['geo_level'] = "S"
-    return(dfsub)
-
-## NOT CURRENTLY USED
-def find_one_sublevel(naicsdf,level=2):
-    #print(naicsdf.columns)
-    hasdashI=naicsdf['code'].str.contains("-")
-    expanddash=None
-    for badcode in naicsdf.loc[hasdashI,"code"]:
-        splitcode=badcode.split("-")
-        lw=int(splitcode[0])
-        up=int(splitcode[-1])
-        newcodes=range(lw,up+1)
-        expandcodedf=pd.concat([naicsdf[naicsdf['code']==badcode]]*len(newcodes),axis=0,ignore_index=True)
-        expandcodedf['code']=[str(x) for x in newcodes]
-        if expanddash is None:
-            expanddash=expandcodedf
-        else:
-            expanddash=pd.concat([expanddash,expandcodedf],axis=0,ignore_index=True)
-    naicsdf=naicsdf.loc[~hasdashI,:]
-    naicsdf=pd.concat([naicsdf,expanddash],axis=0,ignore_index=True)
-
-    naicsdf['level']=naicsdf['code'].str.len()
-    onelevelbelow=None
-    for level in [2,3,4,5]:
-        abovedf=naicsdf[naicsdf['level']==level+1]
-        abovedf['levelcode']=abovedf['code'].str[:-1]
-        countcodes=abovedf['levelcode'].value_counts()
-        onesublevel=pd.Series(countcodes[countcodes==1].index.values)
-        if level==2:
-            onesublevel=onesublevel.str.ljust(6,"-")
-        elif level<5:
-            onesublevel=onesublevel.str.ljust(6,"/")
-        if onelevelbelow is None:
-            onelevelbelow=onesublevel
-        else:
-            onelevelbelow=np.concat([onelevelbelow,onesublevel])
-    #print(onelevelbelow)
-    return onelevelbelow, naicsdf
-
-
-
 ## gets state, cnty, geography, industry, and ind_level from geoindkey
-def fill_from_geoindkey(data,numeric_ind_level=True,naics_xwalk=None):
+def fill_from_geoindkey(data,
+                        numeric_ind_level=True,
+                        naics_xwalk=None,
+                        naicsdata=None):
+    """
+        Parse geoindkey identifier into geographic and industry components.
+
+        Extracts state, county, geography, industry, and aggregation level information
+        from the composite geoindkey field. Optionally merges with NAICS classification
+        data for sector and supersector information.
+
+        Args:
+            data (pd.DataFrame):
+                Input DataFrame containing 'geoindkey' column.
+                Format: '[state][county]_[naics_code]' where industry is padded with "-" or "/"
+
+            numeric_ind_level (bool):
+                If True, ind_level is numeric (0-6 digits) and agglvl_code (72-78) is calculated.
+                If False, ind_level is categorical ('A', 'S', etc.).
+                Default is True.
+
+            naics_xwalk (pd.DataFrame or str, optional):
+                NAICS crosswalk table or filepath containing sector/supersector mappings.
+                If string, treated as filepath to crosswalk file.
+                If provided, merges columns: ['naics2', 'supersector', 'domain']
+                Default is None.
+            naicsdata (pd.DataFrame, optional):
+                row for each naics6 code and
+                columns for the corresponding naics5,4,3,2 levels
+                default for 2016 data is used
+
+        Returns:
+            pd.DataFrame:
+                Input DataFrame with added columns:
+                - geography: State + County (5 characters)
+                - state: State FIPS code (2 characters)
+                - cnty: County FIPS code (3 characters)
+                - industry: Industry code extracted from geoindkey
+                - ind_level: Industry detail level (0-6 digits, or categorical)
+                - agglvl_code: Aggregation level code (72-78, if numeric_ind_level=True)
+                - naics2/3/4/5/6: NAICS codes at each level (if numeric_ind_level=True)
+                - supersector, domain: From NAICS crosswalk (if provided)
+
+        Note:
+            - Modifies input DataFrame in-place
+            - Automatically maps 2-digit aggregations: 31↔32↔33, 44↔45, 48↔49 (2-digit groupings)
+        """
     #split geoindkey into geography and industry portions
     expandgeoind=data['geoindkey'].str.split('_',expand=True)
     if len(expandgeoind.columns)>2:
@@ -97,6 +105,7 @@ def fill_from_geoindkey(data,numeric_ind_level=True,naics_xwalk=None):
         ninddig[ninddig == '2'] = "S"
         data['ind_level']=ninddig
 
+    # Optionally merge NAICS classification data (sectors, supersectors)
     if naics_xwalk is not None:
         containsdash = data['naics2'].astype(str).str.contains("-").sum()
         if isinstance(naics_xwalk,str):
@@ -106,47 +115,98 @@ def fill_from_geoindkey(data,numeric_ind_level=True,naics_xwalk=None):
                 naics_xwalk=get_xwalk_naics(naics_xwalk,expand_naics2=True)
             naics_xwalk.rename(columns={"naics_sector":"naics2","super_sector":"supersector"},inplace=True, errors="ignore")
         data=data.merge(naics_xwalk[['naics2','supersector','domain']],on='naics2',how='left')
-    if numeric_ind_level:
-        data["naics2"] = data["naics2"].astype(str)
-        data.loc[data["naics2"] == "31","naics2"] = "31-33"
-        data.loc[data["naics2"] == "44","naics2"] = "44-45"
-        data.loc[data["naics2"] == "48","naics2"] = "48-49"
-        data.loc[data["naics2"] == "32", "naics2"] = "31-33"
-        data.loc[data["naics2"] == "45", "naics2"] = "44-45"
-        data.loc[data["naics2"] == "49", "naics2"] = "48-49"
-        data.loc[data["naics2"] == "33", "naics2"] = "31-33"
+
+    if naicsdata is not None:
+        dashdict = {"31": [31, 32, 33],"44": [44, 45],"48": [48, 49]}
+    else:
+        dashdict = {}
+        for dash2 in naicsdata.loc[
+            (naicsdata["dashed_naics2"]) & (naicsdata["ind_level"] == 2), "naics2"].to_list():
+            dashdict[str(dash2)] = list(naicsdata.loc[(naicsdata["naics2"].astype(str) == str(dash2)) &
+                                                      (naicsdata["ind_level"] == 3), "naics3"].astype(str).str.slice(stop=2).unique())
+    for key, value in dashdict.items():
+        data["naics2"] = data["naics2"].str.replace("|".join(["_" + str(val) for val in value]),
+                                                    "_" + str(key), regex=True)
+
     return data
 
 def count_notna(x):
     return x.notna().sum()
 
-def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",include_source=True,onlyQCEW=False,perestab_stats=False,naicsdf=None, include_estab_emp3_stats=True):
-    '''
-    What is the point?
-        get_codes_summary() aggregates wage data (qp1) from detailed NAICS codes up to higher
-        levels of aggregation, while tracking data availability and missingness patterns.
+def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",
+                      include_source=True,onlyQCEW=False,
+                      perestab_stats=False,naicsdf=None,
+                      include_estab_emp3_stats=True):
+    """
+    Aggregate detailed industry codes up to a higher aggregation level.
 
-        For example: Can aggregate from 6-digit NAICS up to 3-digit sector level while
-        preserving counts of available/missing wage values.
-    Inputs:
-        1. dfin - pd.DataFrame containing:
-           - geoindkey: Composite geographic-industry keys (e.g., '01001_1111//')
-           - qp1: Wage values from CBP data
-           - qp1_nf: Wage suppression flags ('D' = suppressed)
-        2. groupbydigits - Target aggregation level (default=3):
-           - 2: Sector level (e.g., '31-33' Manufacturing)
-           - 3: Subsector level
-           - 4: Industry group level
-        3. levelgrouped - Source data level (default=4):
-           - Typically 4 or 6 digit NAICS codes being aggregated
+    Summarizes wage, employment, or establishment data from detailed NAICS codes
+    (e.g., 6-digit) up to broader categories (e.g., 3-digit sector) while tracking
+    data availability and source information.
+
+    PURPOSE:
+        Enables hierarchical aggregation (e.g., from 6-digit NAICS to 3-digit sector)
+        while preserving information about data quality, suppression, and source.
+
+    WORKFLOW:
+        1. Parse geoindkey to extract geographic/industry components
+        2. Group by target aggregation level (groupbydigits)
+        3. Sum variable values and count available/missing data
+        4. Track data sources (CBP, QCEW, QWI) if requested
+        5. Return aggregated summary with metadata
+
+    Args:
+        dfin (pd.DataFrame):
+            Input data with columns:
+            - geoindkey: Geographic-industry composite key
+            - Variable columns (e.g., 'wages', 'estnum', 'emp1')
+            - Optional source columns (e.g., 'wages_source', 'wages_cbp')
+
+        groupbydigits (int):
+            Target NAICS aggregation level for grouping (2-5).
+            2=2-digit sector, 3=3-digit subsector, 4=4-digit group
+            Default is 3.
+
+        levelgrouped (int):
+            Source detail level of data being aggregated (typically 4 or 6).
+            Default is 4.
+
+        variable (str):
+            Variable to aggregate ('wages', 'emp1', 'emp2', 'emp3', 'estnum').
+            Default is "wages".
+
+        include_source (bool):
+            If True, includes data source information in output.
+            Default is True.
+
+        onlyQCEW (bool):
+            If True, filters to only QCEW source data before aggregation.
+            Default is False.
+
+        perestab_stats (bool):
+            If True, statistics about the variable per establishment are also used
+
+        naicsdf (pd.DataFrame, optional):
+            NAICS crosswalk table for hierarchical processing.
+            Default is None.
+
+        include_estab_emp3_stats (bool):
+            If True, includes establishment and emp3 statistics in output.
+            Default is True.
+
     Returns:
-        pd.DataFrame with columns:
-        - geo[groupbydigits]naics: Composite geographic-aggregated industry keys
-        - Count[levelgrouped]Codes: Number of original codes in each group
-        - wageCBP_sum[levelgrouped]by[groupbydigits]: Sum of available wages
-        - wageCBP_missing[levelgrouped]by[groupbydigits]: Count of suppressed values
-        - grouplevels: Metadata about aggregation level
-    '''
+        pd.DataFrame:
+            Aggregated summary with columns:
+            - geo[groupbydigits]naics: Geographic-industry grouping key
+            - [variable]_sum[levelgrouped]by[groupbydigits]: Sum of values
+            - [variable]_missing[levelgrouped]by[groupbydigits]: Count of missing/suppressed values
+            - [variable]_propmissing[levelgrouped]by[groupbydigits]: Proportion missing
+            - count[levelgrouped]codes: Number of source codes in each group
+            - [variable]_source: Predominant source (if include_source=True)
+            - Additional source-specific columns if include_source=True
+
+
+    """
     # Step 1: Define regex pattern to filter appropriate geoindkey values
     # Handles different NAICS code lengths (e.g., '01001_1111//' for 4-digit)
     pattern_grep = rf"_[0-9]{{{levelgrouped}}}[^0-9]{{{6 - levelgrouped}}}"
@@ -171,8 +231,7 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
     label_group = f"{levelgrouped}by{groupbydigits}"
     # Step 3: Filter and prepare dataframe
     df = dfin[dfin['geoindkey'].str.contains(pattern_grep, regex=True)].copy()
-    #if set(df.index.values)!=set(dfin.loc[dfin['agglvl_code']==78,:].index.values):
-    #    print(f"missing index {set(df.index.values)-set(dfin.loc[dfin['agglvl_code']==78,:].index.values)}")
+
     if "geo"+str(groupbydigits)+"naics" in df.columns:
         df["geodignaics"]=df["geo"+str(groupbydigits)+"naics"]
     elif groupbydigits==2:
@@ -255,13 +314,11 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",inc
             newcolname_missing=(variable, lambda x: x.isna().sum())
         )
     count6dig['grouplevels'] = f"group{label_group}"
-    #print(count6dig[count6dig["CountCodes"]!=count6dig['newcolname_missing']].head())
     if include_source:
         sumsource=df.pivot_table(index="geodignaics",columns=variable+"_source",values=variable,aggfunc='sum',fill_value=0).add_prefix("sum_"+variable+"_")
         countsource = df.pivot_table(index="geodignaics", columns=variable + "_source", values=variable,
                                    aggfunc=count_notna,dropna=True,fill_value=0).add_prefix("count_" + variable + "_from_")
         count6dig=pd.concat([count6dig,sumsource,countsource],axis=1)
-    #print(count6dig.loc[(count6dig["CountCodes"]!=count6dig['newcolname_missing'])&(count6dig['newcolname_missing']>3),:].head())
 
 
     count6dig=count6dig.reset_index()
@@ -392,24 +449,14 @@ def one_naics_code_below_filler(df,naicsdf):
     onebelowdf=pd.concat(onlyonebelow) #combined the dataframes from ilvl 2,3,4,5
     onebelowdf["formatted_code"]=onebelowdf["code"].map(format_industry_from_code)
 
-    #print(onebelowdf[["additional_digit","formatted_code","single_code_level_below"]].head(10))
-    #print(onebelowdf.shape)
-    #print(onebelowdf['additional_digit'].value_counts())
-    #print(onebelowdf.loc[~onebelowdf["additional_digit"].isin(["0","1","9"]),["additional_digit","formatted_code","single_code_level_below","ind_level"]])
     if "industry" not in df.columns:
         df["industry"]=df['geoindkey'].str.split("_")[1]
     for ilvl in [6,5,4,3]:
-        #print(f"{ilvl} up")
         level_onebelow=onebelowdf.loc[onebelowdf['ind_level']==ilvl,:]
-        #print(f"{ilvl} get df rows that match one code below options")
         already_filled=df.loc[df['industry'].isin(level_onebelow['single_code_level_below']),["geoindkey","estnum","industry","emp1","emp2","emp3","wages","emp1_source","emp2_source","emp3_source","wages_source","estnum_source"]]
-        #print(already_filled.head())
-        #print(f"count of naics-{ilvl} code that are only children that appear in df already {level_onebelow.loc[level_onebelow['single_code_level_below'].isin(already_filled['industry']),:].shape[0]} out of {level_onebelow.shape[0]}")
         df = one_level_one_naics_code_below_filler_up(df, onebelowdf, level=ilvl)
-        #print(level_onebelow.head())
-        #raise Exception("stop")
+
     for ilvl in [2,3,4,5]: #for each level fill the df codes below
-        #print(f"{ilvl} down")
         df=one_level_one_naics_code_below_filler_down(df,onebelowdf,level=ilvl)
     return(df)
 
@@ -429,14 +476,8 @@ def one_level_one_naics_code_below_filler_up(df,onebelowdf,level=6):
     df_i=df.set_index('geoindkey')
     already_filled_i=already_filled.set_index('geoindkey')
     df=df_i.combine_first(already_filled_i).reset_index()
-    #print(df.loc[
-    #          ~df['geoindkey'].isin(df_i.reset_index()['geoindkey'].tolist()), ['geoindkey', 'agglvl_code', 'estnum', 'emp1',
-    #                                                                   'emp2', 'emp3', 'wages_qcew',
-    #                                                                   'wages_cbp']].sort_values(by="geoindkey").head())
 
     return df
-
-
 
 #given a level. this function repeats rows of df when there is only 1 code below that level
 def one_level_one_naics_code_below_filler_down(df,onebelowdf,level=2):
@@ -469,25 +510,7 @@ def one_level_one_naics_code_below_filler_down(df,onebelowdf,level=2):
     for col in cols_to_fill:
         df_joined[col] = df_joined[col].fillna(df_joined[f'{col}_possible_fill'])
     df_joined.drop(columns=[col for col in df_joined.columns if col.endswith('_possible_fill')])
-    #print(df.loc[df['industry'].isin(onelevelonebelow['single_code_level_below'].tolist()),['geoindkey','agglvl_code','estnum','emp1','emp2','emp3','wages_qcew','wages_cbp']].sort_values(by="geoindkey").head())
-    #print(df_joined.loc[~df_joined['geoindkey'].isin(df['geoindkey'].tolist()),['geoindkey','agglvl_code','estnum','emp1','emp2','emp3','wages_qcew','wages_cbp']].sort_values(by="geoindkey").head())
 
-    # raise Exception('stop')
-    # if lwcode_indf==0:
-    #     repdf=df.loc[df["industry"].isin(onelevelonebelow["formatted_code"].tolist())].copy()
-    #     repdf["agglvl_code"]=repdf["agglvl_code"]+1
-    #     for add_digit in list(onelevelonebelow["additional_digit"].unique()):
-    #         add_digit_indic=repdf["industry"].isin(onelevelonebelow.loc[onelevelonebelow["additional_digit"]==add_digit,"formatted_code"].tolist())
-    #         if level==2:
-    #             repdf.loc[add_digit_indic,"geoindkey"]=repdf.loc[add_digit_indic,'geoindkey'].str.replace("----",str(add_digit)+"///")
-    #             repdf.loc[add_digit_indic,"industry"]=repdf.loc[add_digit_indic,'industry'].str.replace("----",str(add_digit)+"///")
-    #         else:
-    #             repdf.loc[add_digit_indic,"geoindkey"] = repdf.loc[add_digit_indic,'geoindkey'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
-    #             repdf.loc[add_digit_indic,"industry"] = repdf.loc[add_digit_indic,'industry'].str.replace("/"*(6-level), str(add_digit) + ("/"*(5-level)))
-    #         for naics_col in [col for col in repdf.columns if "naics" in col.lower() and str(level+1) in col.lower()]:
-    #             repdf[naics_col]=repdf[naics_col].astype(str)
-    #             repdf.loc[add_digit_indic,naics_col]=repdf.loc[add_digit_indic,naics_col].str+str(add_digit)
-    #     df=pd.concat(df,repdf)
     return df
 
 
@@ -503,10 +526,14 @@ def one_level_one_naics_code_below_filler_down(df,onebelowdf,level=2):
 #       dashed_naics2: indicator that the 'naics' code is a part of one of the dashed 2-digit naics groupings. (i.e. 31-33)
 def process_naics_file(code_file,code_col=1,code_sep=','):
     codedf = pd.read_csv(code_file, sep=code_sep)
+    # Extract NAICS codes from specified column
+
     if code_col in codedf.columns:
         codedf['naics'] = codedf.loc[:, code_col]
     else:
         codedf["naics"] = codedf.iloc[:, code_col]
+
+    # Identify and expand dashed code ranges
     dashI = codedf["naics"].astype(str).str.contains("-")
     if dashI.sum() > 0:
         dashdf = codedf.loc[dashI, :]
@@ -524,11 +551,15 @@ def process_naics_file(code_file,code_col=1,code_sep=','):
             list_dfs.append(dfrep)
             startcode_dict[startcode]=list_codes
         codedf = pd.concat(list_dfs)
+    #Calculate aggregation level
     codedf["ind_level"] = codedf['naics'].astype(str).str.count(r'\d')
+
+    # Create columns for each NAICS level
     naicsdf=codedf.loc[:,["ind_level","naics"]]
     for ilvl in [6,5,4,3,2]:
         naicsdf['naics' + str(ilvl)] = naicsdf['naics'].astype(str).str.slice(stop=ilvl)
         naicsdf["formatted_code"]=naicsdf["naics"].map(format_industry_from_code)
+        # Mark codes that belong to dashed 2-digit grouping
         if ilvl==2 and dashI.sum() > 0:
             naicsdf["dashed_naics2"]=False
             for key,value in startcode_dict.items():
@@ -545,12 +576,39 @@ def format_industry_from_code(code):
         return code.ljust(6,"/")
 
 def geo2naics_dash_handler(data,naicsdata=None):
+    """
+    Handle 2-digit NAICS dashed groupings in geographic-industry keys.
+
+    Converts individual NAICS codes (31, 32, 33) to their grouped representation
+    (31-33, 31-33, 31-33) in the geo[N]naics columns. This ensures consistency with
+    published aggregations where certain 2-digit sectors are reported as ranges.
+
+    Args:
+        data (pd.DataFrame):
+            DataFrame containing geo[N]naics columns with individual NAICS codes.
+
+        naicsdata (pd.DataFrame, optional):
+            NAICS crosswalk identifying which codes belong to dashed groupings.
+            If None, uses hardcoded 2012 NAICS defaults.
+            Default is None.
+
+    Returns:
+        pd.DataFrame:
+            Input DataFrame with geo[N]naics values updated to use dashed groupings
+            where applicable.
+
+    Note:
+        Common 2-digit dashed groupings in NAICS:
+        - 31, 32, 33 → 31-33 (Manufacturing)
+        - 44, 45 → 44-45 (Retail Trade)
+        - 48, 49 → 48-49 (Transportation)
+    """
     if naicsdata is None: #use 2012 default
         dashdict={"31":[31,32,33],
                   "44":[44,45],
                   "48":[48,49]}
 
-    else:
+    else:         # Build dictionary from NAICS crosswalk
         dashdict={}
         for dash2 in naicsdata.loc[(naicsdata["dashed_naics2"])&(naicsdata["ind_level"]==2),"naics2"].to_list():
             dashdict[str(dash2)]=list(naicsdata.loc[(naicsdata["naics2"].astype(str)==str(dash2))&(naicsdata["ind_level"]==3),"naics3"].astype(str).str.slice(stop=2).unique())

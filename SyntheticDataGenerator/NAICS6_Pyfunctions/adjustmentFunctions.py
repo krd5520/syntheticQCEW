@@ -1,15 +1,8 @@
-import re
 import statsmodels.api as sm
-from statsmodels.stats.outliers_influence import OLSInfluence
 from formulaic import Formula
 import sys
 import os
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.stats import norm
-
-from typing import Dict, List, Tuple, Optional
 
 sys.path.append(os.path.abspath('./'))
 from GeneralFunctions import custom_predict
@@ -27,7 +20,6 @@ pd.set_option('mode.chained_assignment', None)
 PRINTHEADS = False
 
 # Hard-coded NAICS codes excluded from CBP (Census Bureau of Population) data
-EXCLUDED_CBP_NAICS6 = ["525110", "525120", "525190", "525920", "541120"]
 EXCLUDED_CBP = [
     "92----",   # Public administration
     "111///",   # Crop production
@@ -42,73 +34,115 @@ EXCLUDED_CBP = [
     "541120"    # Offices of other holding companies
 ]
 
-# Configuration dataframe for CBP data quality flags
-# Maps suppression flags to minimum and maximum noise percentages
-HARDCODE_CBP_FLAGS = pd.DataFrame({
-    'flag': ["G", "H", "J"],
-    'min_noise_percent': [0.0, 0.02, 0.05],
-    'max_noise_percent': [0.02, 0.05, np.nan]
-})
 
-printheads = False  # for testing in development
-## Hard-coded, NAICS codes which CBP does not include in its data.
-excluded_cbp_naics6 = ["525110", "525120", "525190", "525920", "541120"]
-excluded_cbp = ["92----", "111///", "112///", "482///", "491///", "814///", "525110", "525120", "525190", "525920",
-                "541120"]
-
-hardcode_cbp_flags = pd.DataFrame(
-    {'flag': ["G", "H", "J"], 'min_noise_percent': [0.0, 0.02, 0.05], 'max_noise_percent': [0.02, 0.05, np.nan]})
+# ============================================================================
+# FUNCTIONS FOR ADJUSTING TO CORRECT INCONSISTENCIES AND TO ACCOUNT FOR SOURCE OR QUARTER
+# ============================================================================
 
 
-def excluded_cbp_adjustments(df, excluded_cbp):
-    return df
-
-
-def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None, formula=None, adjust_source=True,
-                              source="CBP", rseed=None):
+def quarter_source_adjustment(data,
+                              generalConfig,
+                              response,
+                              quarterConfig=None,
+                              formula=None,
+                              adjust_source=True,
+                              source="CBP",
+                              rseed=None):
     '''
-    What is the point?
-        get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
-        predictors. This model is used when direct employment data is missing.
-    Steps:
-        1. Filters input data to include only rows where
-            - 'sEmpEnd' is not suppressed
-            - 'sEmp' is not supressed
-            - 'ind_level' is not "A"
-        2. Initial model fitting
-            - Use formula specified in config.yaml (default: 'Emp ~ EmpEnd + estnum + C(sector) + C(state)')
-              to construct the design matrix to fit an OLS model. (model_pre).
-        3. Influential point/Outlier detection
-            - Compute Cook's distance for each observation and filter out observations where Cook's
-              Distance exceeds the threshold set in config.yaml. (default: 1)
-              Compute Studentized Residuals for each observation and filter out observations where they
-              exceed the threshold set in config.yaml
-        4. Refit model after removing influential points
-    Configurable Parameters:
-        The regression formula and Cook's disitance thresholds are both configurable via config.yaml
-        under employmentConfig
-    Returns:
-        1. model  -  (statsmodel.OLS)
-            - Used with custom_predict in get_m1emp() to predict month 1 employment counts
-        2. Prints a message if any influential points are removed.
-            - Helpful Diagnostic
+    Fit an OLS regression model for employment data adjustment across sources or quarters.
+
+    PURPOSE:
+        Creates an OLS model to predict employment values when direct data is missing.
+        Handles two scenarios:
+        1. Adjusting between different data sources (CBP to QCEW, etc.)
+        2. Adjusting for quarterly differences within the same source
+
+    WORKFLOW:
+        1. Data Filtering: Remove suppressed/invalid data
+            - Exclude rows where employment (sEmp/sEmpEnd) is suppressed
+            - Exclude rows with ind_level = "A" (invalid aggregation level)
+
+        2. Initial Model Fitting:
+            - Use formula (from config or provided) to build OLS model
+            - Default formula: 'Emp ~ EmpEnd + estnum + C(sector) + C(state)'
+
+        3. Outlier Detection & Removal:
+            - Calculate Cook's distance (threshold configurable, default: 1.0)
+            - Calculate Studentized residuals (threshold configurable)
+            - Remove observations exceeding thresholds
+
+        4. Model Refitting:
+            - Refit model on cleaned dataset without influential points
+
+    PARAMETERS:
+        data (pd.DataFrame):
+            Input dataset containing employment metrics and covariates
+
+        generalConfig (dict):
+            From overall configuration file
+            General configuration settings
+
+        response (str):
+            Name of the response variable to predict (e.g., 'Emp', 'wages_qcew')
+
+        quarterConfig (dict, optional):
+            From overall configuration file
+            Configuration specific to quarterly adjustments
+            Contains 'EMP_OLS_FORMULA', 'WAGE_OLS_FORMULA', 'DIAGNOSTIC_PLOTS'
+
+        formula (str, optional):
+            Custom regression formula (R/patsy style)
+            If not provided, uses default from config or hardcoded defaults
+
+        adjust_source (bool):
+            True: Adjust between data sources
+            False: Adjust for quarterly differences
+
+        source (str):
+            Name of data source ('CBP', 'QCEW', 'QWI') - used for labeling
+
+        rseed (int, optional):
+            Random seed for reproducibility
+
+    RETURNS:
+        Model object (statsmodels.OLS fitted model)
+            - Can be used with custom_predict() to generate predictions
+            - Contains coefficients, residuals, and diagnostic information
+
+    SIDE EFFECTS:
+        - Modifies input dataframe 'data' in-place:
+            * Fills missing response values with predictions
+            * Adds '{response}_source' column tracking data source
+        - Prints model summary and diagnostic information
+        - May remove influential points, adjusting dataset size
     '''
+
+    # Set random seed for reproducibility if provided
     if rseed is not None:
         np.random.seed(rseed)
+    #create y+quarter variable
     if "year_qtr" not in data.columns:
         data['year_qtr'] = data['year'] + data['qtr'].astype(float).multiply(0.25)
-    # Step 1
-    # get difference of quarters
+
+    # Create working copy to avoid modifying original
     tempdata = data.copy()
 
     if adjust_source:  # adjusting from one data source to another
+        # ====================================================================
+        # SCENARIO 1: ADJUSTING BETWEEN DATA SOURCES (Within same quarter)
+        # ====================================================================
         if formula is None:
-            formula = response + "~."
+            formula = response + "~." #use all variables
+
         usenewsource = data.loc[:, response].isna()
         subdata = tempdata.loc[~usenewsource, :].copy()
-    else:  # adjusting CBP for quarter
+    else:
+        # ====================================================================
+        # SCENARIO 2: ADJUSTING FOR QUARTERLY DIFFERENCES
+        # ====================================================================
         tempdata['year_qtr_diff'] = tempdata['year_qtr_cbp'].astype(float) - tempdata['year_qtr'].astype(float)
 
+        # Build formula stem based on whether data spans multiple quarters
         if tempdata['year_qtr'].nunique() > 1:
             formula_stem = response + "~year_qtr_diff+qtr*naics2+"
         else:
@@ -124,17 +158,27 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
             formula = formula_stem + "wages_cbp*wages_cbp_flag+np.log(estnum_cbp)+np.log(estnum)+emp3_cbp+emp3_cbp_flag+agglvl_code+agglvl_code*naics2"
 
             # ensure variable type is correct
-            for vname in ["year", "wages_cbp", "estnum_cbp", "estnum", "wages_qcew", "emp1_qcew", "emp2_qcew",
-                          "emp3_qcew",
-                          "emp3_cbp"]:
-                tempdata[vname] = tempdata[vname].astype(float)
-            for vname in ['qtr', 'qtr_cbp', 'wages_cbp_flag', "emp3_cbp_flag", "agglvl_code", "naics2", "naics3",
-                          "naics4",
-                          "naics5"]:
-                tempdata[vname] = tempdata[vname].astype("category")
+            # Ensure correct data types for numeric variables
+            numeric_cols = [
+                "year", "wages_cbp", "estnum_cbp", "estnum",
+                "wages_qcew", "emp1_qcew", "emp2_qcew", "emp3_qcew", "emp3_cbp"
+            ]
+            for col in numeric_cols:
+                tempdata[col] = tempdata[col].astype(float)
+
+            # Ensure correct data types for categorical variables
+            categorical_cols = [
+                'qtr', 'qtr_cbp', 'wages_cbp_flag', 'emp3_cbp_flag',
+                'agglvl_code', 'naics2', 'naics3', 'naics4', 'naics5'
+            ]
+            for col in categorical_cols:
+                tempdata[col] = tempdata[col].astype("category")
+
         # dataset to fit model on
         subdata = tempdata[
-            (~tempdata['wages_cbp'].isna()) & (~tempdata['wages_qcew'].isna()) & (~tempdata['emp3_cbp'].isna())].copy()
+            (~tempdata['wages_cbp'].isna()) &
+            (~tempdata['wages_qcew'].isna()) &
+            (~tempdata['emp3_cbp'].isna())].copy()
 
     # Create design matrices (gets the variables ready for fitting in statsmodels.OLS) using the formula
     # and perform initial model fitting
@@ -145,25 +189,19 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
         print("Model to adjust " + source + "  " + response)
         print(model.summary())
 
-        # dataset with missing response values
-        # no_response=data.loc[data.loc[:,response].isna(),:].copy()
+        # Get predictions and standard errors for rows with missing response
         pred, se_fit = custom_predict(tempdata[usenewsource], model, rseed=rseed)
-        # responsefit = np.random.normal(
-        #    loc=pred,  # Center at predicted values
-        #    scale=se_fit,  # Scale by prediction uncertainty
-        #    size=len(no_response)
-        # )
 
+        # Fill missing response values with rounded predictions
         data.loc[usenewsource, response] = np.round(pred, decimals=0)
+
+        # Track data source for imputed values
         if response + "_source" not in data.columns:
             data.loc[:, response + "_source"] = ""
         data.loc[usenewsource, response + "_source"] = source.lower()
         data.loc[data[response].isna(), response + "_source"] = ""
 
-
-
-
-    else:
+    else: #adjust for quarter
         if quarterConfig is not None and quarterConfig['DIAGNOSTIC_PLOTS'] is not None:
             save_diagnostic_plots(model, formula, quarterConfig['DIAGNOSTIC_PLOTS'])
         print("Model to adjust CBP " + response + " to quarter " + str(generalConfig['QTR']))
@@ -180,15 +218,16 @@ def quarter_source_adjustment(data, generalConfig, response, quarterConfig=None,
 def get_varmin(codes4naics, fulldf, variable="emp1"):
     '''
     What is the point?
-        get_wagemin() calculates lower bounds for wages using 6-digit NAICS summaries
+        get_varmin() calculates lower bounds for variable ("emp1","emp2","emp3",or "wages") using 6-digit NAICS summaries
     Inputs:
         1. codes4naics - Array of 4-digit NAICS codes
         2. fulldf - Complete dataset with wage information
+        3. variable - string which indicates which variable we are getting the minimum of ("emp1","emp2","emp3","wages")
     Returns:
         DataFrame with geoindkey and calculated minwage values
     '''
     # Get 6-digit NAICS summaries
-    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable,include_estab_emp3_stats=False)
+    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable,include_estab_emp3_stats=False,naicsdf=codes4naics)
     # Create minwage column (0 if no data available)
     tomerge6dig['min' + variable] = np.where(tomerge6dig[variable + '_sum6by4'].isna(), 0,
                                              tomerge6dig[variable + '_sum6by4'])
@@ -197,7 +236,7 @@ def get_varmin(codes4naics, fulldf, variable="emp1"):
     return tomerge6dig
 
 
-def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="emp1", fulldf=None, onlyqcew=True,
+def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, variable="emp1", fulldf=None, onlyqcew=True,
                                minonly=True):
     '''
     What is the point?
@@ -205,10 +244,11 @@ def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="em
     Inputs:
         1. fitdf - DataFrame with estimates
         2. dfmaxmin - DataFrame with min/max bounds (if none, then fulldf must be the full data without the estimates)
-        3. stabvals- if using stable employment as lower bound on employment, this is a series of those values
-        4. variable- string name of variable to be adjusted
-        5. adjust_indic- series of indicators to determine which of fitdf[variable] can be adjusted.
-        6. fulldf- if dfmaxmin is not provided, them fulldf must be the full data without the estimates
+        3. variable- string name of variable to be adjusted
+        4. adjust_indic- series of indicators to determine which of fitdf[variable] can be adjusted.
+        5. fulldf- if dfmaxmin is not provided, them fulldf must be the full data without the estimates
+        6. onlyqcew- if True indicates only variable values with source "qcew" will be used to set min and max values
+        7. minonly- if True indicates the variable will only be adjusted with the minimum
     Returns:
         DataFrame with adjusted wage values
     '''
@@ -230,7 +270,7 @@ def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, stabvals=None, variable="em
     #    fitdf.loc[:, "min" + variable] = np.fmin(fitdf["min" + variable].to_numpy(), stabvals.to_numpy())
     #    fitdf.loc[fitdf['min'+variable]==stabvals,'min_source']="stable_emp"
 
-    if printheads:
+    if PRINTHEADS:
         ## check given qcew values
         fitdf['value_status'] = "within calculated bounds"
         fitdf.loc[(fitdf[variable] < fitdf['min' + variable]), 'value_status'] = "below calculated min"
@@ -591,7 +631,7 @@ def adjust_negative_diff(df4, df, justdrop=True):
     return df4, df6
 
 
-def adjust_nonqcew_negdiff_nomissing(subdf4, df6, df, vname="wages", cbpflagdf=hardcode_cbp_flags):
+def adjust_nonqcew_negdiff_nomissing(subdf4, df6, df, vname="wages"):
     print(f'inside adjust_nonqcew_negdiff {vname}')
     subdf6 = df6.loc[df6['geo4naics'].isin(subdf4['geo4naics']), :]
     print(subdf6.columns)
@@ -604,7 +644,7 @@ def adjust_nonqcew_negdiff_nomissing(subdf4, df6, df, vname="wages", cbpflagdf=h
     return df4, df6, df
 
 
-def adjust_nonqcew_negdiff_yesmissing(subdf4, df6, df, vname="wages", cbpflagdf=hardcode_cbp_flags):
+def adjust_nonqcew_negdiff_yesmissing(subdf4, df6, df, vname="wages"):
     print(f'inside adjust_nonqcew_negdiff_yesmissing {vname}')
     df['geo4naics'] = df['geoindkey'].str.slice(stop=-2)
     subdf4['prop_wages_from_qcew'] = subdf4['count_wages_from_qcew'] / subdf4['count6by4codes']
@@ -769,93 +809,137 @@ def adjust_hierarchical_consistency(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def avgestnum_source_adjustment(dfin, check_consistency=True, keep_only_filled_emp3=False, naicsdf=None, claude=True):
+def avgestnum_source_adjustment(dfin, check_consistency=True, naicsdf=None):
+    """
+        Adjust employment and wages based on establishment counts across aggregation levels.
+
+        This function systematically adjusts employment and wage data by using establishment
+        counts (estnum) as a scaling factor across different NAICS aggregation levels
+        (6-digit, 5-digit, 4-digit, 3-digit, 2-digit).
+
+        The workflow:
+        1. Filter data to rows with valid establishment counts
+        2. Adjust 6-digit NAICS codes using 5-digit aggregates
+        3. Adjust 5-digit NAICS codes using 4-digit aggregates
+        4. Continue down to 2-digit NAICS codes
+        5. Recalculate employment and wage values using adjusted estnum
+        6. Check consistency at each level if requested
+
+        Args:
+            dfin (pd.DataFrame):
+                Input dataframe with employment data, establishment counts, and NAICS codes.
+
+            check_consistency (bool):
+                If True, verify consistency between aggregation levels after adjustment.
+                Prints diagnostic information about inconsistencies.
+                Default is True.
+
+            keep_only_filled_emp3 (bool):
+                If True, keep only rows where emp3 (third employment measure) is not NA.
+                Default is False.
+
+            naicsdf (pd.DataFrame, optional):
+                Lookup table for NAICS code hierarchies.
+                Default is None.
+
+            claude (bool):
+                Placeholder for future functionality.
+                Default is True.
+
+        Returns:
+            pd.DataFrame:
+                Dataframe with adjusted establishment counts and recalculated employment/wage values.
+                Rows with missing establishment counts are removed.
+
+        Side Effects:
+            - Creates backup columns: 'wages_old', 'emp1_old', 'emp2_old', 'emp3_old', 'estnum_old'
+            - Prints consistency check results if check_consistency=True
+            - Removes rows with missing establishment numbers
+        """
     df = dfin.copy()
-    #if keep_only_filled_emp3:
-    #    df = df.loc[df["emp3"].notna(), :]
+
+    #keep only rows with establishment numbers
     df = df.loc[df['estnum'].notna(), :]
-    df[['wages_old', 'emp1_old', 'emp2_old', 'emp3_old', 'estnum_old']] = df[
-        ['wages', 'emp1', 'emp2', 'emp3', 'estnum']]
-    print(f"\n number of na estnum's before adjust 4 by 6 {df['estnum'].isna().sum()}")
 
-    excluded_cbp_stem = [str(stem).replace("-", "").replace("/", "") for stem in excluded_cbp]
-    df=adjust_by_estnum(df,groupbydigits=5,levelgrouped=6,naicsdf=naicsdf)
+    # Apply hierarchical adjustments from 6-digit down to 2-digit NAICS
+    df=adjust_estnum(df,groupbydigits=5,levelgrouped=6,naicsdf=naicsdf)
+    df=adjust_estnum(df,groupbydigits=4,levelgrouped=5,naicsdf=naicsdf)
+    df=adjust_estnum(df,groupbydigits=3,levelgrouped=4,naicsdf=naicsdf)
+    df=adjust_estnum(df,groupbydigits=2,levelgrouped=3,naicsdf=naicsdf)
 
-    df=adjust_by_estnum(df,groupbydigits=4,levelgrouped=5,naicsdf=naicsdf)
-    df=adjust_by_estnum(df,groupbydigits=3,levelgrouped=4,naicsdf=naicsdf)
-    df=adjust_by_estnum(df,groupbydigits=2,levelgrouped=3,naicsdf=naicsdf)
-
+    # Recalculate employment and wage totals using adjusted estnum
     for vname in ["wages", "emp1", "emp2", "emp3"]:
         df[vname] = df[vname + "_perestnum"] * df['estnum']
         df[vname] = df[vname].round(0)
 
-    print("-----------------\n Checking consistency after all adjustments\n -------------------------")
-    for grby_agglvl in [77, 76, 75]:
-        groupbydigits = grby_agglvl - 72
-        levelgrouped = groupbydigits + 1
-        labelstr = str(levelgrouped) + "by" + str(groupbydigits)
-        if "geo" + str(groupbydigits) + "naics" not in df.columns:
-            str_end_idx = -(6 - groupbydigits)
-            df['geo' + str(groupbydigits) + 'naics'] = df['geoindkey'].str.slice(stop=str_end_idx)
-            if groupbydigits == 2:
-                df = geo2naics_dash_handler(df, naicsdf)
-        if check_consistency:
-            print(f'Checking NAICS-{levelgrouped} grouped in NAICS-{groupbydigits}: {labelstr}')
-            countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped,
-                                            variable="estnum",
-                                            onlyQCEW=False, include_source=False, naicsdf=naicsdf,include_estab_emp3_stats=False)
-            grby_indic = (df['agglvl_code'] == grby_agglvl)
-            dfgrby = df[grby_indic]
-            dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
-                                    suffixes=["", "_droplater"])
-            nolw = dfestnum["estnum_sum" + labelstr].isna()
-            dfestnum.loc[nolw, "estnum_sum" + labelstr] = 0
-            dfestnum.loc[nolw, "estnum_propmissing" + labelstr] = 1
-            dfestnum.loc[nolw, "estnum_missing" + labelstr] = dfestnum.loc[nolw, "estnum"]
-            dfestnum.loc[nolw, "count" + labelstr + "codes"] = 0
-            dfestnum['estnum_diff'] = dfestnum['estnum'] - dfestnum['estnum_sum' + labelstr]
-            # print(f"{labelstr}\n {dfestnum[['emp1','emp2','emp3','wages','estnum','estnum_diff']].describe()}")
-            missinglw = dfestnum["count" + labelstr + "codes"] == 0
-            if missinglw.sum() != 0:
-                print(
-                    f"There are {missinglw.sum()} countyXnaics{groupbydigits} without any countyXnaics{levelgrouped} cells in it.")
-            dfestnum = dfestnum.loc[dfestnum["count" + labelstr + "codes"] > 0, :].copy()
-            missing_estnums = dfestnum['estnum_missing' + labelstr] > 0
-            if missing_estnums.sum() > 0:
-                print(
-                    f"There are {missing_estnums.sum()} countyXnaics{groupbydigits} that are missing estnum values for some countyXnaics{levelgrouped} cells in it.")
-                print(dfestnum.loc[
-                          dfestnum['estnum_missing' + labelstr] > 0, ['geoindkey', 'estnum', 'estnum_sum' + labelstr,
-                                                                      'estnum_missing' + labelstr, "estnum_diff",
-                                                                      "estnum_source", "estnum_cbp",
-                                                                      "estnum_qcew"]].head())
-            dfestnum_new = dfestnum.loc[dfestnum['estnum_missing' + labelstr] == 0, :].copy()
-            notzero = dfestnum_new.loc[(dfestnum_new['estnum_diff'].round(0) != 0) & (
-                ~dfestnum_new["geoindkey"].str.contains("|".join(excluded_cbp), regex=True)), :].shape[0]
-            if notzero != 0:
-                print(
-                    f'There are {notzero} countyXnaics{groupbydigits} cells with inconsistent establishment numbers to the countyXnaics{levelgrouped} cells. ( {100 * notzero / (dfestnum.shape[0])}%) after removing groupings with no grouped cells and cells with missing subcells.')
-                print(dfestnum.loc[dfestnum['estnum_diff'] != 0, ['geoindkey', 'estnum', 'estnum_sum' + labelstr,
-                                                                  'estnum_missing' + labelstr, "estnum_diff",
-                                                                  "estnum_source", "estnum_cbp", "estnum_qcew"]].head())
-
-
     return df
 
 
-def adjust_by_estnum(dfin2, groupbydigits=4, levelgrouped=6, justestnum=True, check_consistency=True, naicsdf=None,
-                     printmore=False):
+def adjust_estnum(dfin2,
+                  groupbydigits=4, levelgrouped=6,
+                  naicsdf=None,
+                  printmore=False):
+    """
+        Adjust employment data based on establishment count aggregates across NAICS levels.
+
+        This function adjusts employment and wage values for a specific geographic-industry
+        grouping by ensuring they are consistent with aggregate counts at a higher NAICS level.
+
+        Two adjustment modes:
+        1. justestnum=True: Only adjust establishment counts based on aggregates
+        2. justestnum=False: Adjust all employment/wage metrics using per-establishment ratios
+
+        Args:
+            dfin2 (pd.DataFrame):
+                Input dataframe with employment data and geographic-industry codes.
+
+            groupbydigits (int):
+                Number of NAICS digits to group by (2-5).
+                2=2-digit, 3=3-digit, 4=4-digit, 5=5-digit NAICS level.
+                Default is 4.
+
+            levelgrouped (int):
+                Number of NAICS digits in the detailed level to aggregate (must be > groupbydigits).
+                Default is 6.
+
+            naicsdf (pd.DataFrame, optional):
+                NAICS code lookup table for handling special cases like 2-digit with dashes.
+                Default is None.
+
+            printmore (bool):
+                If True, print additional diagnostic messages during adjustment.
+                Default is False.
+
+        Returns:
+            pd.DataFrame:
+                Dataframe with adjusted values at the specified aggregation level.
+                Rows with missing establishment counts are removed.
+
+        Raises:
+            Exception: If groupbydigits is not in range 2-5.
+        """
+
     df = dfin2.copy()
+
+    #validate input parameters
     if groupbydigits < 2 or groupbydigits > 5:
         raise Exception(
             f'Code does not currently support adjustments to the county level values. groupbydigits should be 2,3,4, or 5.')
+    if levelgrouped<=groupbydigits or levelgrouped not in [3,4,5,6]:
+        raise Exception(f'levelgrouped {levelgrouped} must be greater than groupbydigits {groupbydigits} and in values 3,4,5,6')
+
+    # Calculate aggregation level code and create grouping column
     grby_agglvl = 72 + groupbydigits
     str_end_idx = -(6 - groupbydigits)
     df['geo' + str(groupbydigits) + 'naics'] = df['geoindkey'].str.slice(stop=str_end_idx)
+
+    # Special handling for 2-digit NAICS with dashes
     if groupbydigits == 2:
         df = geo2naics_dash_handler(df, naicsdf)
     countlvldig = get_codes_summary(df, groupbydigits=groupbydigits, levelgrouped=levelgrouped, variable="estnum",
                                     onlyQCEW=False, include_source=False, naicsdf=naicsdf,include_estab_emp3_stats=False)
+
+    # Extract rows at target aggregation level and merge with aggregates
     grby_indic = (df['agglvl_code'] == grby_agglvl)
     dfgrby = df[grby_indic]
     dfestnum = dfgrby.merge(countlvldig, on=['geo' + str(groupbydigits) + 'naics'], how='left', indicator=False,
@@ -863,35 +947,23 @@ def adjust_by_estnum(dfin2, groupbydigits=4, levelgrouped=6, justestnum=True, ch
     dfestnum.drop(columns=[dropcol for dropcol in dfestnum.columns if "_droplater" in dropcol], errors="ignore",
                   inplace=True)
     labelstr = str(levelgrouped) + "by" + str(groupbydigits)
-    excluded_cbp_stem = [str(stem).replace("-", "").replace("/", "") for stem in excluded_cbp]
-    if justestnum:  # just adjusting the establishment number (adjust the variable values in avgestnum_source_adjustment function)
-        dfestnum['estnum_new'] = dfestnum['estnum_sum' + labelstr]
-        df = df.merge(dfestnum[['geoindkey', 'estnum_new']], on="geoindkey", how="left", indicator=False)
-        numna = df.loc[(df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].isna()) & (
-            ~df["geoindkey"].str.startswith(tuple(excluded_cbp_stem))), :].shape[0]
-        if numna > 0 and printmore:
-            print(
-                f"for {labelstr} estnum: there are {numna} at agglevel {grby_agglvl} which are NA based on sum{labelstr}.")
-        df.loc[(df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].notna()), 'estnum'] = df.loc[
-            (df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].notna()), 'estnum_new']
-        df.drop(columns='estnum_new', inplace=True, errors="ignore")
-    else:
-        for vname in ['wages', 'emp1', 'emp2', 'emp3']:
-            vname_grby_source = dfestnum[vname + "_source"]
-            vname_grby_source[vname_grby_source == "qwi"] = "qcew"
-            estnum_s = dfestnum["estnum_qcew"]
-            estnum_s[vname_grby_source == "cbp"] = dfestnum.loc[vname_grby_source == "cbp", "estnum_cbp"]
-            dfestnum[vname + '_perest'] = dfestnum[vname] / estnum_s
-            # df4estnum['old_'+vname]=df4estnum[vname]
-            dfestnum[vname] = dfestnum[vname + "_perest"] * dfestnum['estnum_sum' + labelstr]
-            dfestnum.drop(columns=[vname + "_perest"], inplace=True)
-        dfestnum['estnum'] = dfestnum['estnum_sum' + labelstr]
+    excluded_cbp_stem = [str(stem).replace("-", "").replace("/", "") for stem in EXCLUDED_CBP]
 
-        df = df.merge(dfestnum[['geoindkey', 'wages', 'emp1', 'emp2', 'emp3', 'estnum']], on="geoindkey", how="left",
-                      indicator=False, suffixes=["", "_adj"])
-        df.loc[df['agglvl_code'] == grby_agglvl, ['wages', 'emp1', 'emp2', 'emp3', 'estnum']] = df.loc[
-            df['agglvl_code'] == grby_agglvl, ['wages_adj', 'emp1_adj', 'emp2_adj', 'emp3_adj', 'estnum_adj']]
-        df.drop(columns=['wages_adj', 'emp1_adj', 'emp2_adj', 'emp3_adj', 'estnum_adj'], inplace=True, errors="ignore")
+    dfestnum['estnum_new'] = dfestnum['estnum_sum' + labelstr]
+    df = df.merge(dfestnum[['geoindkey', 'estnum_new']], on="geoindkey", how="left", indicator=False)
+
+    # Check for missing values at this aggregation level
+    numna = df.loc[
+            (df['agglvl_code'] == grby_agglvl) &
+            (df['estnum_new'].isna()) &
+            (~df["geoindkey"].str.startswith(tuple(excluded_cbp_stem))),
+            :].shape[0]
+    if numna > 0 and printmore:
+        print(
+            f"for {labelstr} estnum: there are {numna} at agglevel {grby_agglvl} which are NA based on sum{labelstr}.")
+    df.loc[(df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].notna()), 'estnum'] = df.loc[
+        (df['agglvl_code'] == grby_agglvl) & (df['estnum_new'].notna()), 'estnum_new']
+    df.drop(columns='estnum_new', inplace=True, errors="ignore")
 
     df = df[df["estnum"].notna()]
     return df

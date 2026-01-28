@@ -24,7 +24,7 @@ def cut1(naicscode):
     # Cuts 1 character off end of string
     return str(naicscode)[:-1]
 
-def postprocess_est_microdata_split(filename, yr, qtr, xwalk=None):
+def postprocess_est_microdata_split(filename, generalConfig=None, naicsdata=None,xwalk=None):
     """
     Processes a single SynMicrodata file:
     
@@ -47,28 +47,32 @@ def postprocess_est_microdata_split(filename, yr, qtr, xwalk=None):
     """
     print(f"Processing file: {filename}")
     estdf = pd.read_csv(filename)
-    
-    # Generate NAICS 5,4,3,sector codes
-    estdf['naics5'] = estdf['naics6'].apply(cut1)
-    estdf['naics4'] = estdf['naics5'].apply(cut1)
-    estdf['naics3'] = estdf['naics4'].apply(cut1)
-    estdf['naics_sector'] = estdf['naics3'].apply(cut1)
-    estdf['naics'] = estdf['naics6']
-    
+    if xwalk is not None and ~set(["supersector","naics2"]).issubset(set(xwalk.columns)):
+        xwalk['supersector']=xwalk['super_sector']
+        xwalk['naics2']=xwalk['naics_sector']
+    estdf=fill_from_geoindkey(estdf,numeric_ind_level=True,naics_xwalk=xwalk,naicsdata=naicsdata)
+
 
     # Add constant columns
-    estdf['year'] = yr
-    estdf['qtr'] = qtr
+    for varname in ["year","qtr"]:
+        if varname not in estdf.columns:
+            estdf[varname] = generalConfig[varname.upper()]
     estdf['own'] = 5
     estdf['can_agg'] = 'Y'
     estdf['rectype'] = 'C'
     
     # Employee columns are integers
-    estdf['m1emp'] = estdf['m1emp'].astype(int)
-    estdf['m2emp'] = estdf['m2emp'].astype(int)
-    estdf['m3emp'] = estdf['m3emp'].astype(int)
-    estdf['wage'] = estdf['wage'].astype(int)
-    
+    estdf['m1emp'] = estdf['emp1'].astype(int)
+    estdf['m2emp'] = estdf['emp2'].astype(int)
+    estdf['m3emp'] = estdf['emp3'].astype(int)
+    estdf['wage'] = estdf['wages'].astype(int)
+
+
+    if ~set(['naics_sector','super_sector']).issubset(set(estdf.columns)):
+        estdf['naics_sector']=estdf['naics2']
+        estdf['super_sector']=estdf['supersector']
+    if 'naics' not in estdf.columns:
+        estdf['naics']=estdf['naics6']
     # Reorder columns
     estdf = estdf[['year', 'qtr', 'state', 'cnty', 'own', 'naics', 
                    'naics3', 'naics4', 'naics5', 'naics_sector', 'super_sector', 
@@ -80,7 +84,7 @@ def postprocess_est_microdata_split(filename, yr, qtr, xwalk=None):
     
     return estdf
 
-def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynMicrodata"):
+def combine_and_split_iterative(generalConfig, microdataConfig,filebasename="SynMicrodata",naicsdata=None):
     """
     Processes SynMicrodata files one by one, assigns primary keys,
     and writes each state's subset to its corresponding file.
@@ -101,12 +105,16 @@ def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynM
                    - Otherwise, create a new file with the header.
     5. Print a message when all files have been processed.
     """
-    folder = Path(postprocessingConfig['SUBSET_OUTPATH'])
-    outdir = Path(postprocessingConfig['OUTPATH'])
+    folder = Path(microdataConfig['SUBSET_OUTPATH'])
+    outdir = Path(microdataConfig['OUTPATH'])
     # Crosswalk file from
     ## https://www.bls.gov/cew/classifications/industry/industry-supersectors.htm
-    crosswalk_file = postprocessingConfig['CROSSWALK']
+    crosswalk_file = generalConfig['BLS_NAICS_CROSSWALK']
     #state_file = postprocessingConfig['FIPS_STATE_FILE']
+
+    if naicsdata is None and generalConfig.get["NAICS_FILE"] is not None:
+        naicsdata=process_naics_file(generalConfig["NAICS_FILE"], code_col=1, code_sep=",")
+
 
     state_abbr = {
         "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
@@ -122,6 +130,7 @@ def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynM
     
     # Get the cleaned crosswalk
     crosswalk = get_xwalk_naics(crosswalk_file)
+    #print(f'crosswalk in microdataPostprocessing:\n{crosswalk.head()}')
     
     # Ensure the overall output directory exists
     if os.path.exists(outdir):
@@ -137,22 +146,25 @@ def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynM
     
     #Holds all data for final csv
     final_data = []
-    
+    yr=generalConfig["YEAR"]
+    qtr=generalConfig["QTR"]
     # Process each file individually
     for file in filenames_sorted:
-        df = postprocess_est_microdata_split(str(file), yr=yr, qtr=qtr, xwalk=crosswalk)
+        df = postprocess_est_microdata_split(str(file), generalConfig=generalConfig, naicsdata=naicsdata, xwalk=crosswalk)
         n_rows = len(df)
         # Assign primary keys for this file's rows
         df['primary_key'] = np.arange(primary_key_counter, primary_key_counter + n_rows)
         primary_key_counter += n_rows
         final_data.append(df)
         # For each state, write/appending the subset from this file
+        if ~set(df['state'].astype(str).unique().tolist()).issubset(set(state_abbr.values())):
+            df['state']=df['state'].astype(str).str.rjust(2,"0")
         for fips_code, abbr in state_abbr.items():
-            subdata = df[df['state'] == int(fips_code)]
+            subdata = df[df['state'].astype(str) == str(fips_code)]
             if not subdata.empty:
                 subdir = outdir / f"{abbr}{fips_code}"
                 subdir.mkdir(parents=True, exist_ok=True)
-                file_name = f"{abbr}{fips_code}_qdb_{yr}_1.csv"
+                file_name = f"{abbr}{fips_code}_qdb_{yr}_{qtr}.csv"
                 file_path = subdir / file_name
                 
                 # Write header only if file doesn't exist; else append without header.
@@ -161,6 +173,7 @@ def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynM
                 else:
                     subdata.to_csv(file_path, mode='w', header=True, index=False)
                 print(f"Appended data for {abbr}{fips_code} from {file} to {file_path}")
+        
     
     # Combine all the data from the final_data list into a single DataFrame
     final_df = pd.concat(final_data, ignore_index=True)
@@ -169,7 +182,7 @@ def combine_and_split_iterative(yr, qtr, postprocessingConfig,filebasename="SynM
     final_output_path = outdir / "MicrodataFinal.csv"
     final_df.to_csv(final_output_path, mode='w', header=True, index=False)
     print(f"Final microdata file written to {final_output_path}")
-    
+
     print("All files processed and state files generated.")
 
 # Run the iterative combine and split process
