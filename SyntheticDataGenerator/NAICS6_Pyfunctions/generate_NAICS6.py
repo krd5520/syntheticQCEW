@@ -13,7 +13,7 @@ from adjustmentFunctions import  *
 
 use_QWI_for_wages=True
 
-def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=None,df=None,naicsdf=None):
+def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpoint_saves="DataDiag/PythonPreprocessOut/",supplementaryConfig=None,df=None,naicsdf=None):
     ##################  Dataframes set up  #######################
     # Load main dataset. Location is set in the config.yaml
     # Tell the user where the dataset is located
@@ -124,6 +124,8 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplem
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1diff"] = 0
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1"] = df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1_sum6by4"]
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1_source"] = "sum6by4"
+
+    df4.to_csv(checkpoint_saves+"countyXnaics4_before_imputation.csv")
 
     m1empfit = get_m1emp_model(df=df4,employmentConfig=employmentConfig)
     #print(pd.crosstab(df4["emp1_source"], df4["emp2_source"], dropna=False))
