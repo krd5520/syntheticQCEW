@@ -116,7 +116,7 @@ def fill_from_geoindkey(data,
             naics_xwalk.rename(columns={"naics_sector":"naics2","super_sector":"supersector"},inplace=True, errors="ignore")
         data=data.merge(naics_xwalk[['naics2','supersector','domain']],on='naics2',how='left')
 
-    if naicsdata is not None:
+    if naicsdata is None:
         dashdict = {"31": [31, 32, 33],"44": [44, 45],"48": [48, 49]}
     else:
         dashdict = {}
@@ -247,7 +247,8 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",
         df = df[['geoindkey', 'geodignaics', 'state', 'cnty', variable,"emp3"]]
     else:
         df = df[['geoindkey', 'geodignaics', 'state', 'cnty', 'estnum', variable,"emp3"]]
-
+    if df.columns.duplicated().sum()>0:
+        df=df.loc[:,~df.columns.duplicated()].copy()
     if variable!='estnum' and include_estab_emp3_stats:
         df['estab_notna']=df['estnum']
         df.loc[df[variable].isna(),'estab_notna']=0
@@ -307,12 +308,21 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",
             emp3_notna=('emp3_notna', lambda x: x.sum())
         )
     else:
+        #print("In heirarchy_geoindkey, head")
+        #print(df.head())
+        #print(variable)
+        #print(df[variable].head())
+        #print(df.groupby('geodignaics').agg(
+        #    CountCodes=('geoindkey', 'count'),
+        #    newcolname=(variable, lambda x: np.nansum(x))
+        #).head())
         # Step 4: Aggregate data by grouping key
         count6dig = df.groupby('geodignaics').agg(
             CountCodes=('geoindkey', 'count'),
             newcolname=(variable, lambda x: np.nansum(x)),
             newcolname_missing=(variable, lambda x: x.isna().sum())
         )
+        #print(count6dig.head())
     count6dig['grouplevels'] = f"group{label_group}"
     if include_source:
         sumsource=df.pivot_table(index="geodignaics",columns=variable+"_source",values=variable,aggfunc='sum',fill_value=0).add_prefix("sum_"+variable+"_")
@@ -344,6 +354,10 @@ def get_codes_summary(dfin, groupbydigits=3, levelgrouped=4,variable="wages",
         variable=variable.replace("_qcew","")
     if "geo"+str(groupbydigits)+"naics" in count6dig.columns:
         count6dig.drop(columns="geo"+str(groupbydigits)+"naics",inplace=True)
+    if 'emp3_na' in count6dig.columns:
+        count6dig['emp3_na']=count6dig['emp3_na'].fillna(0)
+    if 'estnum_na' in count6dig.columns:
+        count6dig['estnum_na']=count6dig['estnum_na'].fillna(0)
 
     count6dig = count6dig.rename(columns={
         'geodignaics': f'geo{groupbydigits}naics',

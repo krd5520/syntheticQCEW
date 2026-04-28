@@ -68,26 +68,28 @@ def state_selector(fipscodes_df,states,savechunks):
     if savechunks is None:
         savechunks=1
     if states is not None and len(states)>0: #if states are inputted
-        if isinstance(states,str) and not isinstance(states,list): #if STATES is a string
-            states=list(states.upper()) #standardize format
-            if states=="ALL": #if ALL, do not subset
-                return fipscodes_df,savechunks
-        try: #if iterable, standardize format
-            states=[str(x).upper() for x in states]
-        except:
-            print('STATES must be iterable object. It was '+str(type(states)))
-        if "ALL" in states: #if ALL do not subset
-            return fipscodes_df, savechunks
-        fipscode = fipscodes_df.iloc[:, 0].astype(str).str.upper() #standardize format col1
-        stateselect=(fipscode.isin(states)) #initialize the logical to select states
-        if len(fipscodes_df.columns)>1: #if there are more than 1 column
+        if "all" in states or "All" in states or "ALL" in states:
+            fipscodes_df_out = fipscodes_df.copy()
+            fipscodes_df_out['FIPScode'] = [f"{int(x):02d}" for x in fipscodes_df_out["FIPScode"]]
+            return fipscodes_df_out, savechunks
+        else: #subset states
+            if isinstance(states,str) and not isinstance(states,list): #if STATES is a string
+                states=list(states.upper()) #standardize format
+            try: #if iterable, standardize format
+                states=[str(x).upper() for x in states]
+            except:
+                print('STATES must be iterable object. It was '+str(type(states)))
+            fipscode = fipscodes_df.iloc[:,0].astype(str).str.upper() #standardize format col1
+            stateselect=(fipscode.isin(states)) #initialize the logical to select states
             for colname in fipscodes_df.columns: #iterate columns to create logical
                 fipscode=fipscodes_df[colname].astype(str).str.upper()
                 stateselect=(stateselect)|(fipscode.isin(states))
-        if len(states)==1: #if only one state, then only 1 chunk to save
-            savechunks=1
-        fipscodes_df = fipscodes_df[stateselect] #subset
-    return fipscodes_df, savechunks
+            if len(states)==1: #if only one state, then only 1 chunk to save
+                savechunks=1
+            fipscodes_df = fipscodes_df[stateselect] #subset
+        return fipscodes_df, savechunks
+    else: #no state input
+        return fipscodes_df, savechunks
 
 ########## QWI Download ##########
 ## internal function to iterate across splits if necessary
@@ -96,7 +98,7 @@ def sub_downloadQWI(i,group,url,generalConfig,preprocessConfig,max_retries=3):
     for _, row in group.iterrows(): #for row in group
         fips_code = f"{int(row['FIPScode']):02d}" #fipscode
         paramsqwi = {
-            "get": "Emp,EmpEnd,EmpS,EarnBeg,sEmp,sEmpEnd,sEmpS,sEarnBeg,geography,ind_level,geo_level, ownercode",
+            "get": "Emp,EmpEnd,EarnBeg,sEmp,sEmpEnd,sEarnBeg,geography,ind_level,geo_level,ownercode",
             "for": "county:*",
             "in": f"state:{fips_code}",
             "year": generalConfig["YEAR"],
@@ -121,7 +123,7 @@ def sub_downloadQWI(i,group,url,generalConfig,preprocessConfig,max_retries=3):
     if fulldf_pergroup is not None and len(fulldf_pergroup)>0:
         response = requests.get(url, params=paramsqwi)
         directory = f"{preprocessConfig['DATA_IN_FOLDER']}{preprocessConfig['QWIDIR']}"
-        filename = f"{directory}qwi_co{i}.csv"
+        filename = f"{directory}qwi_co{i}_yr{generalConfig['YEAR']}_qtr{generalConfig['QTR']}.csv"
         os.makedirs(directory, exist_ok=True)
         df = pd.DataFrame(fulldf_pergroup, columns=response.json()[0])
         df=df.loc[df['ownercode']=="A05",:]
@@ -134,8 +136,9 @@ def sub_downloadQWI(i,group,url,generalConfig,preprocessConfig,max_retries=3):
     return(df)
 
 ## download QWI based on configs and a state fipscode dataframe
-def download_QWI(fipscodes_df,preprocessConfig,generalConfig,savechunks=4,max_retries = 3):
+def download_QWI(fipscodes_df,preprocessConfig,generalConfig,savechunks=10,max_retries = 3):
     url = "https://api.census.gov/data/timeseries/qwi/sa"
+    #url="https://api.census.gov/data/timeseries/qwi"
     api_key = generalConfig['API_KEY']
     state_abbr = {
         "01": "al", "02": "ak", "04": "az", "05": "ar", "06": "ca", "08": "co", "09": "ct", "10": "de",
@@ -146,18 +149,21 @@ def download_QWI(fipscodes_df,preprocessConfig,generalConfig,savechunks=4,max_re
         "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
     }
     states=state_abbr.keys()
-    if "STATES" in generalConfig:
-        if generalConfig['STATES'] is not None:
-            if "ALL" not in generalConfig["STATES"]:
-                states=generalConfig["STATES"]
-
-    fipscodes_df,num_split=state_selector(fipscodes_df=fipscodes_df, states=states, savechunks=savechunks)
-
+    if "STATES" in generalConfig and generalConfig['STATES'] is not None:
+        if "ALL" not in generalConfig["STATES"]:
+            states=generalConfig["STATES"]
+            fipscodes_df_out,num_split=state_selector(fipscodes_df=fipscodes_df, states=states, savechunks=savechunks)
+        else:
+            fipscodes_df_out=fipscodes_df
+            num_split=savechunks
+    else:
+        fipscodes_df_out = fipscodes_df
+        num_split = savechunks
     print("Downloading QWI county data from https://api.census.gov/data/timeseries/qwi/sa")
     print("Alternatively, you can visit https://ledextract.ces.census.gov/qwi/all and follow the instructions in the documentation.")
     if num_split>0: #if we are splitting the data
-        state_groups = np.array_split(fipscodes_df, num_split)
-        fulldf_pergroup = []
+        state_groups = np.array_split(fipscodes_df_out, num_split)
+        fulldf_pergroup = None
         for i, group in enumerate(state_groups, start=1):
             subdf=sub_downloadQWI(i=i, group=group, url=url, generalConfig=generalConfig, preprocessConfig=preprocessConfig, max_retries=max_retries)
             if fulldf_pergroup is not None:
@@ -166,12 +172,21 @@ def download_QWI(fipscodes_df,preprocessConfig,generalConfig,savechunks=4,max_re
                 fulldf_pergroup=[subdf]
         if fulldf_pergroup is not None:
             outdf=pd.concat(fulldf_pergroup)
+
     else:
-        outdf = sub_downloadQWI(i=1, group=fipscodes_df, url=url, generalConfig=generalConfig,
+        outdf = sub_downloadQWI(i=1, group=fipscodes_df_out, url=url, generalConfig=generalConfig,
                                 preprocessConfig=preprocessConfig, max_retries=max_retries)
+    if "ALL" in states or "all" in states or "All" in states or "TX" in states or "48" in states or "Texas" in states:
+        if outdf.loc[outdf['state'].isin(["48",48,"TX","tx"]),:].shape[0]==0:
+            txdf=sub_downloadQWI(i=num_split+1, group=fipscodes_df_out.loc[fipscodes_df_out["FIPScode"].astype(str)=="48",:],
+                                 url=url,
+                                 generalConfig=generalConfig,
+                                preprocessConfig=preprocessConfig, max_retries=max_retries+1)
+            if txdf is not None:
+                outdf=pd.concat([outdf,txdf])
     directory = f"{preprocessConfig['DATA_IN_FOLDER']}{preprocessConfig['QWIDIR']}"
     print("QWI Data successfully downloaded and saved to " + directory)
-    print("\nSample data:")
+    print("\nSample QWI data:")
     print(outdf.head())
     return(outdf)
 
@@ -194,11 +209,13 @@ def download_rawCBP(fipscodes_df,preprocessConfig,generalConfig,max_retries = 3)
         "49": "ut", "50": "vt", "51": "va", "53": "wa", "54": "wv", "55": "wi", "56": "wy"
     }
     states=state_abbr.keys()
-    if "STATES" in generalConfig:
-        if generalConfig['STATES'] is not None:
-            if "ALL" not in generalConfig["STATES"]:
-                states=generalConfig["STATES"]
-    fipscodes_df, num_split = state_selector(fipscodes_df=fipscodes_df, states=states, savechunks=1)
+    if "STATES" in generalConfig and generalConfig['STATES'] is not None and "ALL" not in generalConfig["STATES"]:
+        states=generalConfig["STATES"]
+        fipscodes_df_out,num_split=state_selector(fipscodes_df=fipscodes_df, states=states, savechunks=1)
+    else:
+        fipscodes_df_out = fipscodes_df.copy()
+
+
 
     print("Downloading CBP county data from "+url)
     print("Alternatively, you can visit https://www.census.gov/data/datasets/"+str(year)+"/econ/cbp/"+str(year)+"-cbp.html and selecting 'county file'")
@@ -208,7 +225,7 @@ def download_rawCBP(fipscodes_df,preprocessConfig,generalConfig,max_retries = 3)
 
     naicstype="NAICS"+str(nyear.astype(int))
 
-    if states is None or len(states)<1: #if using all states
+    if states is None or len(states)<1 or "ALL" in states or "all" in states or "": #if using all states
         params = {
             'get': 'ESTAB,PAYQTR1,PAYQTR1_N_F,EMP,EMP_N_F,PAYANN,PAYANN_N_F,YEAR',
             'for': 'county:*',

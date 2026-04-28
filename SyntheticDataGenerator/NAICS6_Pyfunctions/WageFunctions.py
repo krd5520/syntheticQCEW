@@ -17,7 +17,7 @@ from GeneralFunctions import *
 #    config = yaml.safe_load(configFile)
 #    wageConfig = config['wageConfig']
 
-def get_wages_model(df, emp_mat_adj,wageConfig):
+def get_wages_model(df,wageConfig,return_text=True,modelname=None,quietly=False):
     '''
     What is the point?
         get_wages_model() creates an OLS model that predicts wage differences based on:
@@ -56,25 +56,38 @@ def get_wages_model(df, emp_mat_adj,wageConfig):
     stems=["emp1","emp2","emp3","wages"]
     colstonumeric=[x for x in wagedf4.columns if (any(sub in x for sub in stems)&("source" not in x)&("flag" not in x))]
     wagedf4.apply(lambda col: pd.to_numeric(col) if col.name in colstonumeric else col)
+    if "DIAGNOSTIC_PLOTS" in wageConfig:
+        diagplot = wageConfig['DIAGNOSTIC_PLOTS']
+    else:
+        diagplot = None
 
+    if "wagesdiff" in wageConfig['OLS_FORMULA']:
+        if wageConfig['OLS_FORMULA'].startswith("np.log(") or wageConfig['OLS_FORMULA'].startswith("np.sqrt") or wageConfig['OLS_FORMULA'].startswith("np.log10"):
+            modeldf=wagedf4.loc[(wagedf4['wages_missing6by4'] > 0)&(wagedf4['wagesdiff']>0), :]
+        elif wageConfig['OLS_FORMULA'].startswith("np.log1p("):
+            modeldf=wagedf4.loc[(wagedf4['wages_missing6by4'] > 0) & (wagedf4['wagesdiff'] >= 0), :]
+        else:
+            modeldf=wagedf4.loc[wagedf4['wages_missing6by4'] > 0, :]
+    else:
+        modeldf=wagedf4.copy()
     if "DIAGNOSTIC_PLOTS" in wageConfig:
         diagplot=wageConfig["DIAGNOSTIC_PLOTS"]
     else:
         diagplot=None
-    if "wagesdiff" in wageConfig['OLS_FORMULA']:
-        if wageConfig['OLS_FORMULA'].startswith("np.log") or wageConfig['OLS_FORMULA'].startswith("np.sqrt"):
-            model = get_model(wagedf4.loc[(wagedf4['wages_missing6by4'] > 0)&(wagedf4['wagesdiff']>0), :], wageConfig['OLS_FORMULA'],
-                              wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'],
-                              diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
-                              return_summary_and_diagnostics=False)
-        else:
-            model = get_model(wagedf4.loc[wagedf4['wages_missing6by4']>0,:], wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'],
-                          diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
-                          return_summary_and_diagnostics=False)
+    model, outtext = get_model(modeldf,wageConfig['OLS_FORMULA'],
+                               wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'],
+                               diagnostic_plots=diagplot,
+                               output_removed=True,
+                               include_multicolinearity=True,
+                               return_summary_and_diagnostics=False,
+                               quietly=quietly, modelname=modelname)
+
+    if ~quietly:
+        print(model.summary())
+    if return_text:
+        return model, outtext
     else:
-        model=get_model(wagedf4, wageConfig['OLS_FORMULA'], wageConfig['COOKS_THRESH'], wageConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,include_multicolinearity=True,
-                  return_summary_and_diagnostics=False)
-    print(model.summary())
+        return model
     return model
 
 def get_wagemax(codes4naics, fulldf):
@@ -233,7 +246,7 @@ def wagesFromQWI(df):
     # Multiply employment by earnings
     empmat = df[['emp1','emp2','emp3']].astype(float)
     earnbeg = df['avg_month_emp_wages'].astype(float)
-    wages = np.sum(empmat, axis=1) * earnbeg.values/1000 #match the scale of wages_cbp
+    wages = np.sum(empmat, axis=1) * earnbeg.values#/1000 #match the scale of wages_cbp
     return wages
 
 
@@ -265,7 +278,7 @@ def adjust_wagevalues(fitwagedf, dfmaxmin,count6dig=None,minonly=True):
     #fitwagedf = fitwagedf.drop(columns=['minwages', 'maxwages'])
     return fitwagedf
 
-def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=None, maxmindf=None):
+def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=None, maxmindf=None,wageConfig=None):
     '''
     What is the point?
         get_wages4() is the main function for wage estimation that:
@@ -292,19 +305,27 @@ def get_wages4(df4, wagemodel,formula_str=None,useEarnQWI=False, count6digdf=Non
     #print(f"useModel sum {sum(useModel)}")
     # Optionally use QWI earnings data
     if useEarnQWI:
-        print("Number which uses QWI:", end=" ")
-        print(df4['avg_month_emp_wages'].isna().value_counts(dropna=False))
         EarnBegAvailable = df4['avg_month_emp_wages'].notna()
-        #print(f'sum EarnBegAvailiable {sum(EarnBegAvailable)}')
+        # print(f'sum EarnBegAvailiable {sum(EarnBegAvailable)}')
         useQWI = (EarnBegAvailable) & (~wages_Available)
-        print(f"Using avg_month_emp_wages from QWI for {sum(useQWI)} rows out of {sum(EarnBegAvailable)} QWI available rows.")
-        df4.loc[useQWI, 'wages'] = wagesFromQWI(df4[useQWI])
-        useModel = ~EarnBegAvailable & ~wages_Available
+        override_CBP_QWI=(EarnBegAvailable) & (wages_Available) & (round(df4['wages'],4)==0)
+        final_useQWI=(useQWI)|(override_CBP_QWI)
+        print(f"Number which override CBP or QCEW with QWI avg_month_emp_wages: {sum(override_CBP_QWI)}")
+        print("Number which uses QWI avg_month_emp_wages:", end=" ")
+        print(f"{sum(useQWI)} rows out of {sum(EarnBegAvailable)} available rows.")
+        df4.loc[final_useQWI, 'wages'] = wagesFromQWI(df4[final_useQWI])
+        wages_Available = df4['wages'].notna()
+        useModel = ~wages_Available
+        if wageConfig is not None:
+            wagemodel=get_wages_model(df4, wageConfig, return_text=True, modelname=None, quietly=False)
 
     if wagemodel is None and sum(useModel)>0:
         raise Exception("Without a model there are "+str(sum(useModel)+" missing wage values at the county by NAICS-4 level.\\ You must include a wageConfig in your config file with subfields OLS_FORMULA, COOKS_THRESH, and OUTLIER_THRESH."))
     else:
         print("Number of wage county by NAICS-4 cells which use Model:", sum(useModel))
+        if isinstance(wagemodel,tuple):
+            wagemodel=wagemodel[0]
+        #print(f"wage model is\n {wagemodel}")
         predicted_wages = wagesFromModel(df4[useModel], wagemodel,formula_str=formula_str)
 
 

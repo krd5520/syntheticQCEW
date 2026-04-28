@@ -11,7 +11,7 @@ import yaml
 #     employmentConfig = config['employmentConfig']
 def get_dirichlet_prior(estnum, g_shape, g_scale): 
     #generate gamma random variables to be shape parameters
-    params = np.random.gamma(float(g_shape),float(g_scale),int(estnum))
+    params = np.random.gamma(float(g_shape)/float(estnum),float(g_scale),int(estnum))
     # shape and scale paramters for the gamma distribution were select by trial and error to get
     # some variety of proportions (not essentially equal across all establishments) while getting
     # similiar proportions per establishment across the generated dirichlet 
@@ -225,13 +225,20 @@ def get_establishments_from_one_naics6(naics6row,gamma_shape,
     minwage_reserve=float(wagemin)*float(n)
     naics6row["wages"]=float(naics6row["wages"])-float(minwage_reserve)
     shape_parameters = get_dirichlet_prior(n,g_shape=float(gamma_shape),g_scale=float(gamma_scale)) #shape params for dirichlet generation
-    establishment_props = np.random.dirichlet(shape_parameters,4) #randomly generated proportions
-    transpose_establishment_props = np.transpose(establishment_props) #transpose it for matrix multiplication
+    establishment_props_emps_ends = np.random.dirichlet(shape_parameters,2) #randomly generated proportions
+    establishment_props_wages = np.random.dirichlet(shape_parameters,1) #randomly generated proportions
+    establishment_props_emp2 = np.random.dirichlet(shape_parameters,1) #randomly generated proportions
+
+
+    transpose_establishment_props = np.transpose(establishment_props_emps_ends) #transpose it for matrix multiplication
 
 
     conf_values = np.array([naics6row["emp1"],naics6row['emp2'],naics6row["emp3"],naics6row["wages"]]) #confidential values as an array
+    conf_values_emp_ends = np.array([naics6row["emp1"], naics6row["emp3"]])  # confidential values as an array
 
-    establishment_values = np.multiply(conf_values,transpose_establishment_props) #establishment level values
+    #get emp1, emp3
+    establishment_values_emps_ends = np.multiply(conf_values_emp_ends,transpose_establishment_props) #establishment level values
+    print(establishment_values_emps_ends.head())
     establishment_rows = np.transpose(establishment_values) #transpose for ease in creating data frame
     if "industry" not in naics6row.index.values:
         naics6val = naics6row["geoindkey"].str.split("_").iloc[:,1] #get the naics 6 value

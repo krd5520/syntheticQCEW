@@ -1,0 +1,68 @@
+generalConfig: ## This section is used generally throughout the process.
+  SEED: 1
+  API_KEY: "0a71b2828ce455dbb120cebbb499b0b5bec91962" #optional to download census data from api
+  YEAR: 2016 #year of the data
+  QTR: 1 #quarter for the data
+  STATES: ["AL","PA","NJ","RI","CA","IN","OH","NM"] #Optional to select a subset of states. 
+  SKIP_TO_MICRODATA: FALSE #If FALSE, County by NAICS-6 data will be generated.
+  COMBINED_DATA: "DataDiag/PythonPreprocessOut/combine_data.csv" 
+  NAICS6_FILE: "DataDiag/NAICS6Data.csv" 
+  FULL_FIPS_FILE: "DataDiag/FIPSareacode_full.csv" #optional to download QCEW data.
+  NAICS_FILE: "DataDiag/2012_codes.csv"
+  BLS_NAICS_CROSSWALK: "DataDiag/DataIn/high_level_crosswalk.csv"     ## https://www.bls.gov/cew/classifications/industry/industry-supersectors.htm
+
+
+## Supplementary data for combining for regressions
+otherdataConfig:
+ DATA_IN_FOLDER: "DataDiag/DataIn/"
+ COUNTY_DATA: "rural_urban_fips.txt"
+ COUNTY_DATA_SEP: "tab"
+ COUNTY_FIPS_COLNAME: "FIPS"
+
+## Quarter adjustment for CBP if quarter is not 1
+quarterConfig:
+ OLS_FORMULA: "np.log(emp1diff) ~ np.log(Population_2010)+poly(np.sqrt(emp3_emp1_missing6by4),2)+poly(np.log(estnum_emp1_missing6by4),2)+C(supersector)+C(state)"
+ RSEED: 1
+ DIAGNOSTIC_PLOTS: "DataDiag/DiagnosticPlots/month1employment_diagnostics.png"
+
+
+## To combine the CBP, imputedCBP (optional), QWI, and QCEW (optional) data
+preprocessConfig:
+  DATA_IN_FOLDER: "DataDiag/DataIn/"
+  CBPDIR: "CBPdataRAW/"
+  CBPDATA: "CBPdataRAW/cbp16co.txt"
+  IMPUTECBP: "ImputeCBP/efsy_cbp_2016.csv"
+  QWIDIR: "QWIdata/"
+  QCEWDIR: "QCEWdata/" #optional if using QCEW data
+  OUTPATH: "DataDiag/PythonPreprocessOut/"
+  DIAGNOSTIC_FILE: "diagnosticsCombined.txt" # optional
+
+ 
+## For imputation of County by NAICS-4 monthly employment
+employmentConfig:
+  OLS_FORMULA: "np.log(emp1diff) ~ np.log(Population_2010)+poly(np.sqrt(emp3_emp1_missing6by4),2)+poly(np.log(estnum_emp1_missing6by4),2)+C(supersector)+C(state)"
+  M2EMP_NOISECOEF: 1.69
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance
+  OUTLIER_THRESH: 3.0 # Threshold for outliers using studentized residuals 
+  RSEED: 5 # This RSEED is for employment imputation
+  DIAGNOSTIC_PLOTS: "DataDiag/DiagnosticPlots/month1employment_diagnostics.png"
+
+## For imputation of County by NAICS-4 monthly quarterly wages
+wageConfig:
+  OLS_FORMULA: "np.log(wagesdiff) ~ C(state)+ C(supersector)+C(RUCC_2013)+wages_propmissing6by4 +np.sqrt(wages_missing6by4)+poly(np.sqrt(emp3),3)"
+  COOKS_THRESH: 1.0  # Threshold for influential points using Cook's distance (filters out 1 observation)
+  OUTLIER_THRESH: 3.0 # Threshold for outliers using studentized residuals (
+  RSEED: 5 # This RSEED is for employment imputation
+  DIAGNOSTIC_PLOTS: "DataDiag/DiagnosticPlots/wages_diagnostics.png"
+
+## For disaggregation of County by NAICS-6 data to establishment-level data
+microdataConfig:
+  ## Dirichlet Prior parameters:
+  EST_SEED: 1 #This seed is for the microdata
+  EMP2_NOISECOEF: 1.69
+  GAM_SHAPE: 3 #10
+  GAM_SCALE: 20 #200
+  WAGE_MIN: 10
+  NUMCHUNK: 10 # For memory management. We generate the microdata in chunks. NUMCHUNKS defines the number of chunks.
+  SUBSET_OUTPATH: "DataDiag/PythonMicrodataSubsets/"
+  OUTPATH: "FinalMicrodata"

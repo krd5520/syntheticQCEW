@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import scipy.stats
+import re
 from sklearn.preprocessing import PolynomialFeatures
 from statsmodels.stats.outliers_influence import OLSInfluence, variance_inflation_factor
 from formulaic import Formula
@@ -15,6 +16,7 @@ import os
 
 sys.path.append(os.path.abspath("./NAICS6_Pyfunctions/"))
 from plottingFunctions import *
+
 
 ## Function is incomplete. It formats the fitted model as a latex style string to be used as suptitle of
 ## matplotlib plots with usetex=True. Currently it does not handle transformation formatting or polynomial term formatting.
@@ -95,6 +97,12 @@ def transform_feature(feature, df):
     elif 'np.sqrt' in feature:
         internalvar = feature.split('(')[1].split(')')[0].strip()
         return np.sqrt(df.loc[:,internalvar].astype(float))
+    elif 'np.log10' in feature:
+        internalvar = feature.split('(')[1].split(')')[0].strip()
+        return np.log10(df.loc[:, internalvar].astype(float))
+    elif "np.log1p" in feature:
+        internalvar = feature.split('(')[1].split(')')[0].strip()
+        return np.log1p(df.loc[:, internalvar].astype(float))
     elif 'np.log' in feature:
         internalvar = feature.split('(')[1].split(')')[0].strip()
         return np.log(df.loc[:,internalvar].astype(float))
@@ -141,7 +149,15 @@ def polynomial_handling(feature,X,df):
             #X.drop(index_drop, inplace=True)
             #transformsqrt.drop(index_drop, inplace=True)
             vals = transformsqrt.values.reshape(-1, 1)
-        elif "np.log(" in base_var:
+        elif "np.log10" in base_var:
+            internal_var = base_var.split("(")[1].split(")")[0].strip()
+            transformlog = np.log10(df.loc[X.index,internal_var].astype(float))
+            vals = transformlog.values.reshape(-1, 1)
+        elif "np.log1p" in base_var:
+            internal_var = base_var.split("(")[1].split(")")[0].strip()
+            transformlog = np.log1p(df.loc[X.index, internal_var].astype(float))
+            vals = transformlog.values.reshape(-1, 1)
+        elif "np.log" in base_var:
             internal_var = base_var.split("(")[1].split(")")[0].strip()
             transformlog = np.log(df.loc[X.index,internal_var].astype(float))
             #nan_mask = np.isnan(transformlog)
@@ -157,7 +173,7 @@ def polynomial_handling(feature,X,df):
             #vals_prep.drop(index_drop, inplace=True)
             vals=vals_prep.values.reshape(-1, 1)
         # Create polynomial features
-
+        #print(f'{feature} polynomial degrees {int(degree)} values have shape {vals.shape[0]} by {vals.shape[1]}')
         poly = PolynomialFeatures(degree=int(degree), include_bias=False)
         raw_poly = poly.fit_transform(vals)
         # Center and orthogonalize using QR decomposition
@@ -246,7 +262,11 @@ def custom_predict(data, ols_model,rseed=None):
             temp_pred_idx = set(pred_idx) - set(df.loc[missing_mask1, :].index.tolist())
             pred_idx=list(temp_pred_idx-set(df.loc[missing_mask2].index.tolist()))
         else:
-            featurecolname=feature_to_colname(feature,df)
+            try:
+                featurecolname=feature_to_colname(feature,df)
+            except:
+                print(feature)
+                print(df.sort_index(axis=1).columns)
             missing_mask=df[featurecolname].isna()
             pred_idx=list(set(pred_idx)-set(df.loc[missing_mask,:].index.tolist()))
     nopred_idx=set(df.index.tolist())-set(pred_idx)
@@ -359,12 +379,14 @@ def subset_model_data(data,formula_str):
     data=data.loc[:,list(checkvars)].copy()
     #print(data.head())
     outdf=data[data.notna().all(axis=1)]
-    print(outdf.shape[0])
+    #print(outdf.shape[0])
     #print(outdf.head())
     return data[data.notna().all(axis=1)]
 
 
-def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicolinearity=False,diagnostic_plots=None,output_removed=False,return_summary_and_diagnostics=False):
+def get_model(data,formula_str,cooks_thresh,studentresid_thresh,
+              include_multicolinearity=False,diagnostic_plots=None,
+              output_removed=False,return_summary_and_diagnostics=False,savetables=True,modelname=None,quietly=False,):
     '''
     What is the point?
         get_model() creates an OLS model that predicts values based on various
@@ -391,7 +413,8 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicol
             save the diagnostic plots from the final model
     '''
 
-
+    if modelname is None:
+        modelname=formula_str
     # Step 1
     # Retrieve OLS formula from config.yaml
     formula=formula_str
@@ -422,6 +445,17 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicol
     # Threshold is configurable in config.yaml -> employmentConfig -> 'COOKS_THRESH'
     influential_indices = [i for i, d in enumerate(cooks_d) if d > Config['COOKS_THRESH']]
     outliers = [i for i, r in enumerate(student_resid) if np.abs(r) > Config['OUTLIER_THRESH']]
+    if output_removed and len(influential_indices)+len(outliers)>0:
+        if Config['DIAGNOSTIC_PLOTS'] is not None:
+            outliersplots=Config['DIAGNOSTIC_PLOTS'].replace(".png","_withOutliers.png")
+
+            plot_outlier_diagnostics(model_pre,modelname, cook_threshold=Config["COOKS_THRESH"],
+                                     stud_threshold=Config["OUTLIER_THRESH"],
+                                     figsize=(14, 5),
+                                     plotstem=Config["DIAGNOSTIC_PLOTS"].replace(".png",""))
+
+            save_diagnostic_plots(model_pre, "With Outliers: "+modelname, outliersplots,cook_threshold=Config["COOKS_THRESH"],
+                                     stud_threshold=Config["OUTLIER_THRESH"])
     if influential_indices:
         if output_removed:
             if len(influential_indices)<=6:
@@ -429,31 +463,45 @@ def get_model(data,formula_str,cooks_thresh,studentresid_thresh,include_multicol
                             ", ".join([str(x) for x in influential_indices])]
             else:
                 outliertext = [f"Filtered out {len(influential_indices)} outliers due to influence (Cook's Distance)."]
-        else:
+        elif ~quietly:
             print("Filtered out the following indices due to influence (Cook's Distance):", influential_indices)
     elif output_removed:
         outliertext=["Filtered out 0 outliers due to influence (Cook's Distance)."]
     if outliers:
         if output_removed:
             outliertext.append("# of outliers filtered (Studentized Residuals):"+str(len(outliers))+'|'+str(np.round((len(outliers)/len(subdf)),3) * 100)+'%')
-        else:
+        elif ~quietly:
             print("# of outliers filtered (Studentized Residuals):", len(outliers), '|', np.round((len(outliers)/len(subdf)),3) * 100, '%')
     rows_to_drop = influential_indices + outliers
 
-    del X_pre, y_pre, model_pre
+    del X_pre, y_pre#, model_pre
     # Rebuild design matrices without influential points and perform final model fitting.
     y, X = Formula(formula).get_model_matrix(subdf.drop(subdf.index[rows_to_drop]))
     if include_multicolinearity:
-        if return_summary_and_diagnostics:
-            vifdf, multtext = find_multicollinearity(X, return_text=True)
-            outliertext=outliertext+multtext
+        if return_summary_and_diagnostics or output_removed:
+            vifdf, multtext = find_multicollinearity(X, return_text=True,quietly=quietly)
+            outliertext=outliertext+[multtext]
         else:
             vifdf= find_multicollinearity(X, return_text=False)
 
 
     model = sm.OLS(y, X).fit()
     if Config['DIAGNOSTIC_PLOTS'] is not None:
-        save_diagnostic_plots(model,formula_str,Config['DIAGNOSTIC_PLOTS'])
+        save_diagnostic_plots(model,modelname,Config['DIAGNOSTIC_PLOTS'])
+        if savetables:
+            from stargazer.stargazer import Stargazer, LineLocation
+            fullpredictor=predictor_order_freq([model,model_pre])
+            tablename=re.sub('.[a-z]{3,4}$','_summary_table.tex',Config["DIAGNOSTIC_PLOTS"])
+            print("Table name save is:"+tablename)
+            tabstar = Stargazer([model,model_pre])
+            tabstar.custom_columns(["Outlier Removed","Full Data"],[1,1])
+            tabstar.significant_digits(2)
+            tabstar.covariate_order(fullpredictor)
+            tabstar.rename_covariates(stargazer_covariate_renamer(fullpredictor))
+            tabstar.add_custom_notes(outliertext)
+            latextab=tabstar.render_latex()
+            with open(tablename,'w') as f:
+                f.write(latextab)
     # end. return fitted model.
     #print("Done fitting")
     if output_removed:
@@ -476,10 +524,10 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
         np.random.seed(rseed)
     # Get Dirichlet parameters based on m3emp distribution
     if len(params) > 1:  # Multiple parameters
-        print(len(params))
-        print(params)
+        #print(len(params))
+        #print(params)
         checknonneg=params<0
-        print(checknonneg.sum())
+        #print(checknonneg.sum())
         if checknonneg.sum()>0:
             raise Exception(f"Parameters must be non-negative: {params}")
         checkpos=params>0
@@ -488,7 +536,7 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
         else:
             minnonzero=min(params[params>0])
             paramszeros_indic=(params==0).astype(int)
-            print(paramszeros_indic)
+            #print(paramszeros_indic)
             if paramszeros_indic.sum()>0:
                 if minnonzero<1 and param_lb<1: #make sure lower bound is much lower than minnonzero
                     params[paramszeros_indic]=param_lb*minnonzero# if x==0 else x for x in params] #change zeros to small values
@@ -499,7 +547,7 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
                 #params=[param_lb*minnonzero if x==0 else x for x in params] #change zeros to small values
                 else:
                     raise Exception(f"parameter lower bound 'param_lb'={param_lb} should be <1 or < minimum non-zero 'param' value ({minnonzero}).")
-        print(params)
+
         if isinstance(params,np.ndarray) and len(params)>1:
             rprops=scipy.stats.dirichlet.rvs(params,size=size)
         else:
@@ -511,7 +559,8 @@ def dirichlet_divider(params,total,size=1,rseed=None,param_lb=1e-10):
 
 
 
-def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False,ignore_intercept=True):
+# Function writen with assistance from AI
+def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False,ignore_intercept=True,ignore_categorical=True,quietly=False):
     """
     Identify variables with multicollinearity using Variance Inflation Factor (VIF).
 
@@ -538,24 +587,27 @@ def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False
     vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
     if ignore_intercept:
         vif_data=vif_data.loc[vif_data["Variable"]!="Intercept",:].copy()
-
+    if ignore_categorical:
+        vif_data=vif_data.loc[~vif_data["Variable"].str.contains("\\[T."),: ].copy()
+    vif_data = vif_data.loc[~vif_data["Variable"].str.contains(":"), :].copy()
     # Remove the constant from results
     vif_data = vif_data[vif_data["Variable"] != "const"].reset_index(drop=True)
 
     # Sort and flag variables with high VIF
     vif_data = vif_data.sort_values("VIF", ascending=False)
     high_vif = vif_data[vif_data["VIF"] > vif_threshold]
-
+    high_vif['Variable']=high_vif['Variable'].str.replace('\\[.*\\]','',regex=True)
+    high_vif.drop_duplicates(subset="Variable",inplace=True,ignore_index=True)
 
     if return_text:
         if high_vif.empty:
             outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity): None detected"
         else:
-            categories_indic=high_vif["Variable"].str.contains("[T.")
-            if categories_indic.sum()==0:
-                outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
-            else:
-                outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
+            #categories_indic=high_vif["Variable"].str.contains("[T.")
+            #if categories_indic.sum()==0:
+            #    outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
+            #else:
+            outtext=f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):\n{high_vif}"
 
                 #new_high_vif=high_vif.loc[~categories_indic,:]
                 #categories=high_vif.loc[categories_indic,"Variable"].str.split("[",expand=True)[0]
@@ -563,13 +615,13 @@ def find_multicollinearity(df, target=None, vif_threshold=5.0, return_text=False
 
 
         return vif_data,outtext
-    else:
+    elif ~quietly:
         print(f"\nModel Predictors with VIF > {vif_threshold} (potential multicollinearity):")
         if high_vif.empty:
             print("None detected.")
         else:
             print(high_vif)
-        return vif_data
+    return vif_data
 
 
 def write_pipe_table(df, filename,include_index=True):
@@ -602,3 +654,133 @@ def write_pipe_table(df, filename,include_index=True):
         f.write(table_text)
 
 
+## Function produced with the assistance of AI
+def summarize_dataframe(df: pd.DataFrame) -> None:
+    """
+    Prints a summary table for a pandas DataFrame with:
+      - Variable name
+      - Variable type (float, int, str, or other)
+      - Number of NA entries
+      - Value summary: range [min, max] for numerics, unique values (up to 5) for strings
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    """
+    rows = []
+
+    for col in df.columns:
+        series = df[col]
+        n_na = int(series.isna().sum())
+
+        # Determine simplified type label
+        if pd.api.types.is_float_dtype(series):
+            type_label = "float"
+        elif pd.api.types.is_integer_dtype(series):
+            type_label = "int"
+        elif pd.api.types.is_string_dtype(series) or pd.api.types.is_object_dtype(series):
+            type_label = "str"
+        else:
+            type_label = str(series.dtype)
+
+        # Build value summary
+        if type_label in ("float", "int"):
+            col_min = series.min()
+            col_max = series.max()
+            if type_label == "float":
+                value_summary = f"[{col_min:.4g}, {col_max:.4g}]"
+            else:
+                value_summary = f"[{col_min}, {col_max}]"
+        elif type_label == "str":
+            uniques = series.dropna().unique().tolist()
+            if len(uniques) > 5:
+                display = ", ".join(str(v) for v in uniques[:5]) + ", ..."
+            else:
+                display = ", ".join(str(v) for v in uniques)
+            value_summary = display
+        else:
+            value_summary = "—"
+
+        rows.append((col, type_label, n_na, value_summary))
+
+    # Column widths
+    col_w = max(len("Variable"), max(len(r[0]) for r in rows))
+    type_w = max(len("Type"), max(len(r[1]) for r in rows))
+    na_w = max(len("# NA"), max(len(str(r[2])) for r in rows))
+    summary_w = max(len("Value Summary"), max(len(r[3]) for r in rows))
+
+    header = (f"{'Variable':<{col_w}}  {'Type':<{type_w}}  {'# NA':<{na_w}}  {'Value Summary':<{summary_w}}")
+    divider = "-" * len(header)
+
+    print(divider)
+    print(header)
+    print(divider)
+    for col, type_label, n_na, value_summary in rows:
+        print(f"{col:<{col_w}}  {type_label:<{type_w}}  {n_na:<{na_w}}  {value_summary:<{summary_w}}")
+    print(divider)
+
+def predictor_order_freq(modoutdict):
+    # get list of predictors for ordering predictors later
+    listpredictors = []
+    if isinstance(modoutdict,dict):
+        listmodels=[modoutdict[key][2] for key in modoutdict.keys()]
+    else:
+        listmodels=modoutdict
+    for model in listmodels:
+        predictors = model.model.exog_names
+        if listpredictors is None:
+            listpredictors = [x for x in predictors]
+        else:
+            listpredictors = listpredictors + [x for x in predictors]
+    # get frequency of each predictor term across the models
+    freqs = {}
+    for itm in listpredictors:
+        freqs[itm] = freqs.get(itm, 0) + 1
+    orderedpreds = dict(sorted(freqs.items(), reverse=True))  # sort by frequency
+    listpredictors = list(dict.fromkeys(listpredictors))
+
+    fullordered=[]
+    orderedbasepreds=[]
+    for key,value in orderedpreds.items():
+        basekey=key
+        if ")" in key:
+            basekey = basekey.split(')', 1)[0].split("(")[-1]
+            if "," in basekey:
+                basekey = basekey.split(',')[0]
+        basekey=basekey.strip()
+        if basekey not in orderedbasepreds:
+            orderedbasepreds=orderedbasepreds+[basekey]
+            fullordered=fullordered+sorted([x for x in listpredictors if basekey in x])
+    fullordered = ["Intercept"] + fullordered
+    fullordered=list(dict.fromkeys(fullordered))
+    return fullordered
+
+
+def stargazer_covariate_renamer(covariateorder):
+    covariatemap = {}
+    for i, covvar in enumerate(covariateorder):
+        covvarkey = covvar
+        covvar = covvar.replace("_", "\_")
+        addparenth = False
+        if "np." in covvar:
+            addparenth = True
+            covvar.replace("np.log10(", "\\log_{10}(").replace("np.log(", "\\ln(").replace("np.log1p(", "\\ln(1+").replace(
+                "np.sqrt(", "\\sqrt(")
+        if covvar.startswith("poly("):
+            degree = covvar.replace("]", "[").split("[")[1]
+            interiorpoly = covvar.split("(", 1)[1]
+            interiorpoly = interiorpoly.split(",", 1)[0]
+            if degree == "1":
+                if addparenth:
+                    covvar = interiorpoly + ")"
+                else:
+                    covvar = interiorpoly
+            else:
+                if addparenth:
+                    covvar = "(" + interiorpoly + "))^" + degree
+                else:
+                    covvar = "(" + interiorpoly + ")^" + degree
+        elif addparenth:
+            covvar = covvar + ")"
+        covariatemap[covvarkey] = "$" + covvar + "$"
+    return covariatemap

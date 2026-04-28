@@ -155,7 +155,10 @@ def quarter_source_adjustment(data,
             else:
                 formula = quarterConfig['EMP_OLS_FORMULA']
         elif formula is None:  # use defaults
-            formula = formula_stem + "wages_cbp*wages_cbp_flag+np.log(estnum_cbp)+np.log(estnum)+emp3_cbp+emp3_cbp_flag+agglvl_code+agglvl_code*naics2"
+            if response =="wages_qcew":
+                formula = formula_stem + "wages_cbp+np.log10(estnum_cbp)+np.log10(estnum)+emp3_cbp+agglvl_code+naics2"
+            else:
+                formula = formula_stem + "emp3_cbp+np.log10(estnum_cbp)+np.log10(estnum)+wages_cbp+agglvl_code+naics2"
 
             # ensure variable type is correct
             # Ensure correct data types for numeric variables
@@ -215,7 +218,7 @@ def quarter_source_adjustment(data,
     return data
 
 
-def get_varmin(codes4naics, fulldf, variable="emp1"):
+def get_varmin(codes4naics, fulldf, variable="emp1",onlyqcew=False):
     '''
     What is the point?
         get_varmin() calculates lower bounds for variable ("emp1","emp2","emp3",or "wages") using 6-digit NAICS summaries
@@ -227,7 +230,10 @@ def get_varmin(codes4naics, fulldf, variable="emp1"):
         DataFrame with geoindkey and calculated minwage values
     '''
     # Get 6-digit NAICS summaries
-    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable,include_estab_emp3_stats=False,naicsdf=codes4naics)
+    #print(f"in varmin, codes NAICS are: {codes4naics}")
+    #print(fulldf.head())
+    tomerge6dig = get_codes_summary(dfin=fulldf, groupbydigits=4, levelgrouped=6, variable=variable,include_estab_emp3_stats=False,naicsdf=codes4naics,onlyQCEW=onlyqcew)
+    #print(tomerge6dig.head())
     # Create minwage column (0 if no data available)
     tomerge6dig['min' + variable] = np.where(tomerge6dig[variable + '_sum6by4'].isna(), 0,
                                              tomerge6dig[variable + '_sum6by4'])
@@ -236,7 +242,7 @@ def get_varmin(codes4naics, fulldf, variable="emp1"):
     return tomerge6dig
 
 
-def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, variable="emp1", fulldf=None, onlyqcew=True,
+def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, variable="emp1", fulldf=None, onlyqcew=False,
                                minonly=True):
     '''
     What is the point?
@@ -304,7 +310,7 @@ def adjust_geo4naics_varvalues(fitdf, dfmaxmin=None, variable="emp1", fulldf=Non
     return fitdf
 
 
-def get_varmax(codes4naics, fulldf, variable="emp1"):
+def get_varmax(codes4naics, fulldf, variable="emp1",onlyqcew=False):
     '''
     What is the point?
         get_wagemax() calculates upper bounds for wages by:
@@ -462,7 +468,7 @@ def get_varmax(codes4naics, fulldf, variable="emp1"):
     return outdf
 
 
-def get_varmaxmindf(df4dig, fulldf, variable="emp1", onlyqcew=True):
+def get_varmaxmindf(df4dig, fulldf, variable="emp1", onlyqcew=False):
     '''
     What is the point?
         get_varmaxmindf() combines county by naics4 data with min/max bounds
@@ -478,8 +484,9 @@ def get_varmaxmindf(df4dig, fulldf, variable="emp1", onlyqcew=True):
     # print(f'inside get_varmaxmin before get_varmin. columns of fulldf: {fulldf.columns}')
     if onlyqcew:
         fulldf = fulldf.loc[fulldf[variable + "_source"] == "qcew", :].copy()
-    mindf = get_varmin(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable)
-    maxdf = get_varmax(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable)
+
+    mindf = get_varmin(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable,onlyqcew=onlyqcew)
+    maxdf = get_varmax(codes4naics=df4dig['geoindkey'], fulldf=fulldf, variable=variable,onlyqcew=onlyqcew)
     # Merge all data
     df4_maxmin = df4dig.merge(maxdf, on="geoindkey", how="left") \
         .merge(mindf, on="geoindkey", how="left")
@@ -695,118 +702,12 @@ def adjust_nonqcew_negdiff_yesmissing(subdf4, df6, df, vname="wages"):
     # #print(subdf6.head())
     # #print(subdf6[vname+"_cbp_flag"].value_counts())
 
-    stophere = True
-    if stophere:
-        raise Exception("stop here")
+    #stophere = True
+    #if stophere:
+    #    raise Exception("stop here")
     return df4, df6, df
 
 
-def adjust_hierarchical_consistency(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Adjust values to maintain hierarchical consistency across industry levels.
-
-    The adjustment works from bottom-up (highest ind_level to lowest) and
-    top-down to ensure parent totals equal sum of children.
-    """
-
-    df = df.copy()
-    df = df.sort_values(['geography', 'ind_level', 'industry']).reset_index(drop=True)
-
-    # Numeric columns to adjust
-    value_cols = ['emp1', 'emp2', 'emp3', 'wages', 'estnum']
-
-    # Get unique geographies
-    geographies = df['geography'].unique()
-
-    for geo in geographies:
-        geo_mask = df['geography'] == geo
-        geo_data = df[geo_mask].copy()
-
-        # Get industry levels in descending order (e.g., [6, 5, 4, 3, 2])
-        ind_levels = sorted(geo_data['ind_level'].unique(), reverse=True)
-
-        # Step 1: Bottom-up aggregation - calculate parent totals from children
-        for i, current_level in enumerate(ind_levels[:-1]):
-            parent_level = ind_levels[i + 1]
-
-            # Get all industries at current level
-            current_industries = geo_data[geo_data['ind_level'] == current_level]
-
-            # For each parent industry
-            parent_industries = geo_data[geo_data['ind_level'] == parent_level]['industry'].unique()
-
-            for parent_ind in parent_industries:
-                # Find children (industries that start with parent code)
-                children_mask = (
-                        (geo_data['ind_level'] == current_level) &
-                        (geo_data['industry'].str.startswith(parent_ind))
-                )
-
-                parent_mask = (
-                        (geo_data['geography'] == geo) &
-                        (geo_data['ind_level'] == parent_level) &
-                        (geo_data['industry'] == parent_ind)
-                )
-
-                if children_mask.sum() > 0:
-                    # Calculate sum of children for each value column
-                    for col in value_cols:
-                        children_sum = geo_data.loc[children_mask, col].sum()
-                        parent_value = geo_data.loc[parent_mask, col].values
-
-                        if len(parent_value) > 0:
-                            parent_val = parent_value[0]
-
-                            # If parent has no value but children do, use children sum
-                            if pd.isna(parent_val) and not pd.isna(children_sum) and children_sum > 0:
-                                geo_data.loc[parent_mask, col] = children_sum
-
-                            # If parent has value and children exist, reconcile
-                            elif not pd.isna(parent_val) and not pd.isna(children_sum):
-                                # Use parent value as the authoritative total
-                                # We'll adjust children proportionally in top-down pass
-                                pass
-
-        # Step 2: Top-down adjustment - distribute parent totals to children proportionally
-        for i, parent_level in enumerate(ind_levels[:-1]):
-            child_level = ind_levels[i + 1]
-
-            parent_industries = geo_data[geo_data['ind_level'] == parent_level]['industry'].unique()
-
-            for parent_ind in parent_industries:
-                parent_mask = (
-                        (geo_data['geography'] == geo) &
-                        (geo_data['ind_level'] == parent_level) &
-                        (geo_data['industry'] == parent_ind)
-                )
-
-                children_mask = (
-                        (geo_data['ind_level'] == child_level) &
-                        (geo_data['industry'].str.startswith(parent_ind))
-                )
-
-                if parent_mask.sum() > 0 and children_mask.sum() > 0:
-                    for col in value_cols:
-                        parent_val = geo_data.loc[parent_mask, col].values[0]
-                        children_vals = geo_data.loc[children_mask, col]
-                        children_sum = children_vals.sum()
-
-                        # If parent has value and children have values that don't match
-                        if not pd.isna(parent_val) and parent_val > 0:
-                            if not pd.isna(children_sum) and children_sum > 0:
-                                # Adjust children proportionally
-                                if abs(children_sum - parent_val) > 0.01:  # Allow small rounding errors
-                                    adjustment_factor = parent_val / children_sum
-                                    geo_data.loc[children_mask, col] = children_vals * adjustment_factor
-                            else:
-                                # Children have no values, distribute parent value equally
-                                num_children = children_mask.sum()
-                                geo_data.loc[children_mask, col] = parent_val / num_children
-
-        # Update main dataframe with adjusted values
-        df.loc[geo_mask, value_cols] = geo_data[value_cols].values
-
-    return df
 
 
 def avgestnum_source_adjustment(dfin, check_consistency=True, naicsdf=None):
@@ -834,17 +735,10 @@ def avgestnum_source_adjustment(dfin, check_consistency=True, naicsdf=None):
                 Prints diagnostic information about inconsistencies.
                 Default is True.
 
-            keep_only_filled_emp3 (bool):
-                If True, keep only rows where emp3 (third employment measure) is not NA.
-                Default is False.
 
             naicsdf (pd.DataFrame, optional):
                 Lookup table for NAICS code hierarchies.
                 Default is None.
-
-            claude (bool):
-                Placeholder for future functionality.
-                Default is True.
 
         Returns:
             pd.DataFrame:

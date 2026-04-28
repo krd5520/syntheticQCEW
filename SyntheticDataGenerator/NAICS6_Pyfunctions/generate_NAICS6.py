@@ -1,6 +1,7 @@
 import sys
 import os
 
+import numpy as np
 import pandas as pd
 
 sys.path.append(os.path.abspath('./'))
@@ -48,9 +49,22 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
     df6['geo5naics'] = df6['geoindkey'].str.slice(stop=-1)
     df6['geo3naics'] = df6['geoindkey'].str.slice(stop=-3)
 
+    ## For information to support gamma justification
+    print(f"County by NAICS-6 estnum description\n{df6['estnum'].describe()}")
+    print(f"Quantiles 0.85,0.9,0.95,0.99={np.quantile(df6['estnum'],[0.85,0.9,0.95,0.99])}")
+    print(df6.columns)
+    def tempstats(df,vname):
+        df=df.dropna(subset=vname)
+        print(f'{vname}: Quantiles 0.1,0.25,0.5,0.75,0.85,0.9,0.95,0.99={np.quantile(df[vname],[0.1,0.25,0.5,0.75,0.85,0.9,0.95,0.99]).round(2)}, mean={np.nanmean(df[vname]).round(2)}')
+    tempstats(df6,'emp1_perestnum')
+    tempstats(df6, 'emp2_perestnum')
+    tempstats(df6, 'emp3_perestnum')
+    tempstats(df6, 'wages_perestnum')
+
     df4 = df[df['agglvl_code'] == 76].copy()
     df4['geo4naics'] = df4['geoindkey'].str.slice(stop=-2)
     df4['geo3naics'] = df4['geoindkey'].str.slice(stop=-3)
+
 
 
     #df4,df6,df=adjust_negative_diff(df4=df4,df=df)
@@ -76,33 +90,35 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
         ## Get difference between county by NAICS4 and sum of known county by NAICS6
         df4[vname + "diff"] = df4[vname].astype(float) - df4[vname + '_sum6by4'].astype(float)
 
-
-
     if supplementaryConfig is not None:
-        print('---------- Supplementary Data Configuration ----------')
-        # Display all current employmentConfig settings
-        for key, value in supplementaryConfig.items():
-            print(f"{key}: {value}")
 
-        del key, value
+        print('---------- Checking if Supplementary Data is added ----------')
+
         if 'COUNTY_DATA' in supplementaryConfig:
             if supplementaryConfig['COUNTY_DATA_SEP']=="tab" or supplementaryConfig['COUNTY_DATA_SEP']=="\t":
                 cntydata=pd.read_csv(supplementaryConfig['DATA_IN_FOLDER']+supplementaryConfig["COUNTY_DATA"],sep='\t')
-            else:
+            elif "COUNTY_DATA_SEP" not in supplementaryConfig or supplementaryConfig['COUNTY_DATA_SEP'] is None:
                 cntydata = pd.read_csv(supplementaryConfig['DATA_IN_FOLDER'] + supplementaryConfig["COUNTY_DATA"])
+            else:
+               cntydata = pd.read_csv(supplementaryConfig['DATA_IN_FOLDER'] + supplementaryConfig["COUNTY_DATA"],sep=supplementaryConfig['COUNTY_DATA_SEP'])
+            #if len([x for x in cntydata.columns if x in df4.columns ])>len(cntydata.columns)-1:
             cntydata[supplementaryConfig['COUNTY_FIPS_COLNAME']]=pd.to_numeric(cntydata[supplementaryConfig["COUNTY_FIPS_COLNAME"]],errors="coerce").round(0).astype(int).astype(str)
             df4['geography']=df4['geoindkey'].str.extract(r'^([^_]+)')#split['_'].str[0]
-            df4=df4.merge(cntydata,right_on=supplementaryConfig['COUNTY_FIPS_COLNAME'],left_on="geography",how="left")
+            df4=df4.merge(cntydata,right_on=supplementaryConfig['COUNTY_FIPS_COLNAME'],left_on="geography",how="left",suffixes=["","_supp"])
         if 'STATE_DATA' in supplementaryConfig:
             if supplementaryConfig['STATE_DATA_SEP']=="tab" or supplementaryConfig['STATE_DATA_SEP']=="\t":
                 stdata=pd.read_csv(supplementaryConfig['DATA_IN_FOLDER']+supplementaryConfig["STATE_DATA"],sep='\t')
-            else:
+            elif "STATE_DATA_SEP" not in supplementaryConfig or supplementaryConfig['STATE_DATA_SEP'] is None:
                 stdata = pd.read_csv(supplementaryConfig['DATA_IN_FOLDER'] + supplementaryConfig["STATE_DATA"])
+            else:
+                stdata = pd.read_csv(supplementaryConfig['DATA_IN_FOLDER'] + supplementaryConfig["STATE_DATA"],sep=supplementaryConfig['STATE_DATA_SEP'])
+            #if len([x for x in stdata.columns if x in df4.columns ]) > 1:
             stdata[supplementaryConfig['STATE_FIPS_COLNAME']]=pd.to_numeric(cntydata[supplementaryConfig["STATE_FIPS_COLNAME"]],errors="coerce").round(0).astype(int).astype(str)
             df4['state']=df4['geoindkey'].str.extract(r'^([^_]+)').str.slice(stop=-3)#split['_'].str[0]
-            df4=df4.merge(cntydata,right_on=supplementaryConfig['STATE_FIPS_COLNAME'],left_on="state",how="left")
+            df4=df4.merge(cntydata,right_on=supplementaryConfig['STATE_FIPS_COLNAME'],left_on="state",how="left",suffixes=["","_supp"])
         if 'INDUSTRY_DATA' in supplementaryConfig:
             print(f'Current algorithm does not support industry supplementary data.\n The input {supplementaryConfig["INDUSTRY_DATA"]} will be ignored.')
+        df4.drop(columns=df4.columns[df4.columns.str.endswith("_supp")],inplace=True)
 
 
     ############## Employment Counts ################
@@ -124,9 +140,10 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1diff"] = 0
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1"] = df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1_sum6by4"]
     df4.loc[(negdiff) & (df4["emp1_missing6by4"] == 0), "emp1_source"] = "sum6by4"
+    df4=df4.loc[df4['count6by4codes']>0,:].copy()
 
     df4.to_csv(checkpoint_saves+"countyXnaics4_before_imputation.csv")
-
+    #print(df4.columns)
     m1empfit = get_m1emp_model(df=df4,employmentConfig=employmentConfig)
     #print(pd.crosstab(df4["emp1_source"], df4["emp2_source"], dropna=False))
 
@@ -134,7 +151,7 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
     empMat, df4 = get_employmentCounts4(
         df4,
         m1emp_model=m1empfit,
-        m2emp_noisecoef=employmentConfig['M2EMP_NOISECOEF'],
+        m2emp_noisecoef=employmentConfig['EMP2_NOISECOEF'],
         rseed=employmentConfig['RSEED'],
         include_m1emp_indicator=True
     )
@@ -155,9 +172,15 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
         adjust_onlyqcew = False
 
     print("Adjusting County by NAICS-4 Employment Values")
-    adjustdf = adjust_geo4naics_varvalues(fitdf=df4, dfmaxmin=None,  variable="emp1",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
-    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, variable="emp2",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
-    #adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, stabvals=df4['lwbd_emp_qwi'], variable="emp3",fulldf=fulldf,onlyqcew=adjust_onlyqcew,minonly=True)
+    #print(df4.head())
+    if df4.columns.duplicated().sum()>0:
+        print(df4['emp3'].describe())
+        df4=df4.loc[:,~df4.columns.duplicated()].copy()
+
+    print(df4.columns)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=df4, dfmaxmin=None,  variable="emp1",fulldf=fulldf,onlyqcew=False,minonly=True)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, variable="emp2",fulldf=fulldf,onlyqcew=False,minonly=True)
+    adjustdf = adjust_geo4naics_varvalues(fitdf=adjustdf, dfmaxmin=None, variable="emp3",fulldf=fulldf,onlyqcew=False,minonly=True)
     adjustdf['m1empFromModel']=empMat['m1empFromModel']
     adjustdf = adjustdf.apply(lambda col: pd.to_numeric(col, errors='coerce') if col.name in ['emp1','emp2','emp3','wages'] else col)
 
@@ -172,8 +195,12 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
     prewagemodel.loc[(prewagemodel['emp2'].notna())&(prewagemodel['emp2_source'].isna()),'emp2_source']="noise_impute"
     prewagemodel.loc[(prewagemodel['emp2'].notna())&(prewagemodel['emp2_source'].isna()),'emp2_source']="noise_impute"
 
+
     prewagemodel.drop(columns=[dropcol for dropcol in prewagemodel.columns if "_wdf" in dropcol], errors="ignore", inplace=True)
-    prewagemodel.drop(columns=["minemp1","minemp1_source"], errors="ignore", inplace=True)
+    #prewagemodel.drop(columns=["minemp1","minemp1_source"], errors="ignore", inplace=True)
+    if "sector" not in prewagemodel.columns:
+        indkey = prewagemodel['geoindkey'].astype(str).str.replace('[0-9]*_', "", regex=True)
+        prewagemodel['sector'] = indkey.astype(str).str[:2]
 
     ## Sanity check on na's
     #for cname in ["emp3","emp3_source","emp3_wdf","emp2","emp2_source","emp1","emp1_source"]:
@@ -206,7 +233,7 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
         # CASE 3: if there wages_source is qcew, must adjust county by NAICS-6 cbp values
 
 
-        wagefit_sub = get_wages_model(df=prewagemodel, emp_mat_adj=empMatA,wageConfig=wageConfig)
+        wagefit_sub = get_wages_model(df=prewagemodel, wageConfig=wageConfig)
         # Step 2. Get min/max bounds
     else:
         # Step 1. Create wage prediction model
@@ -217,7 +244,8 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
     wages_maxmin.loc[wages_maxmin["maxwages"]<0,"maxwages"]=wages_maxmin['maxwages'].max()
 
     # Step 3: Impute wage values
-    wagesout = get_wages4(df4=df4, wagemodel=wagefit_sub, useEarnQWI=use_QWI_for_wages, maxmindf=wages_maxmin,count6digdf=count6dig)
+    print(wagefit_sub)
+    wagesout = get_wages4(df4=prewagemodel, wagemodel=wagefit_sub, useEarnQWI=use_QWI_for_wages, maxmindf=wages_maxmin,count6digdf=count6dig,wageConfig=wageConfig)
     # Prepare final 4 digit output
     df4imp = wagesout.copy().assign(
         #EmpScale=lambda x: np.where(x['m3emp'] == 0, 1, x['emp'] / x['m3emp'].astype(float)),
@@ -228,11 +256,11 @@ def generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,checkpo
 
 
 
-    df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
-    df6['geo4naics'] = df6['geoindkey'].str[:-2]
-    df6['geo5naics'] = df6['geoindkey'].str[:-1]
-    df6.loc[df6['wages_source']!="qcew","wages"]=np.nan
-    count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum",onlyQCEW=False,include_estab_emp3_stats=False)
+    # df6 = df[df['geoindkey'].str.contains("_[0-9]{6}", regex=True)].copy()
+    # df6['geo4naics'] = df6['geoindkey'].str[:-2]
+    # df6['geo5naics'] = df6['geoindkey'].str[:-1]
+    # df6.loc[df6['wages_source']!="qcew","wages"]=np.nan
+    # count6dig = get_codes_summary(df, groupbydigits=4, levelgrouped=6, variable="estnum",onlyQCEW=False,include_estab_emp3_stats=False)
 
 
     # df6.to_csv("DataDiag/PythonPreprocessOut/pre_get_all_naics6_df6.csv")

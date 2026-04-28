@@ -61,8 +61,8 @@ def check_microdataConfig(config,m2emp_indicator=False):
     if m2emp_indicator:
         pass
     else:
-        assert "M2EMP_NOISECOEF" in config and isinstance(config["M2EMP_NOISECOEF"],
-                                                 (int, float)), f"mircodataConfig is missing numeric M2EMP_NOISECOEF."
+        assert "EMP2_NOISECOEF" in config and isinstance(config["EMP2_NOISECOEF"],
+                                                 (int, float)), f"mircodataConfig is missing numeric EMP2_NOISECOEF."
     intornone=["EST_SEED","NUMCHUNK"]
     for inputval in intornone:
         assert inputval in config and isinstance(config[inputval], (int,None)), f"microdataConfig "+str(inputval)+" must be integer or None."
@@ -86,13 +86,17 @@ def check_config(config_file):
     employmentConfig=None
     preprocessConfig=None
     supplementConfig=None
+    quarterConfig=None
 
     assert "microdataConfig" in config and isinstance(config['microdataConfig'],dict), f"Config file is missing microdataConfig."
     assert "generalConfig" in config and isinstance(config['generalConfig'],dict), f"Config file is missing generalConfig."
     generalConfig = config['generalConfig']
     microdataConfig = config['microdataConfig']
+    generalConfig['FIPS_STATE_FILE']="DataDiag/DataIn/FIPSstatecodename.txt"
     if 'otherdataConfig' in config:
         supplementConfig=config['otherdataConfig']
+    if 'quarterConfig' in config:
+        quarterConfig=config['quarterConfig']
 
     for val in ["YEAR","QTR","SEED"]:
         assert val in generalConfig and isinstance(generalConfig[val],int), f"generalConfig missing integer-valued "+str(val)+"."
@@ -137,7 +141,7 @@ def check_config(config_file):
             wageConfig = config['wageConfig']
 
 
-    return (generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementConfig)
+    return (generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementConfig, quarterConfig)
 
         #check NAICS6 by county file exists
 

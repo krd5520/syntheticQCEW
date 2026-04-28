@@ -22,6 +22,8 @@ keep_only_emp3_filled=True
 adjustforsource_regression = False #use regression model to adjust for source
 adjustforsource_estnum=True #use average per establishment and adjust to qcew establishment number
 
+
+forpaperinfofile="print_out_for_paper_info.txt"
 ###################################################################################
 ############## Functions for Preprocessing and combining 3 Establishment Datasets
 ###################################################################################
@@ -132,16 +134,24 @@ def preprocess_imputedCBP_file(imputefile,prefer_lw_up=True):
     imputeCBP["state"] = imputeCBP["state"].astype(int).astype(str)
     imputeCBP["cnty"] = imputeCBP["cnty"].astype(int).astype(str).str.zfill(3)
     imputeCBP=imputeCBP[imputeCBP['cnty']!="999"]
+
+    dignum = imputeCBP['industry'].str.count(r'\d')  # number of digits in naics
+    dignum[dignum == 0] = -1  # adjust for state level
+    # cntyindic = raw['cnty'].str.contains(r'\d').map(
+    #    {True: 70, False: 50})  # [re.match("[0-9]*",fips) for fips in tempraw['fipscty'].tolist]
+    imputeCBP['agglvl_code'] = [x + 72 for x in dignum]
     if "emp_raw" in imputeCBP.columns:
         imputeCBP.rename(columns={"emp_raw": "emp"}, inplace=True)
     if os.path.exists(lwupfile):
         numnaemp=imputeCBP['emp'].isna().sum()
-        print(f"imputeCBP: Number of NAs in emp column is: {numnaemp}")
-        return(imputeCBP[['geoindkey','state','cnty','industry','geography','emp','lb','ub']])
+        if numnaemp>0:
+            print(f"imputeCBP: Number of NAs in emp column is: {numnaemp}")
+        return(imputeCBP[['geoindkey','state','cnty','industry','geography','emp','lb','ub','agglvl_code']])
     else:
         numnaemp = imputeCBP['emp'].isna().sum()
-        print(f"imputeCBP: Number of NAs in emp column is: {numnaemp}")
-        return (imputeCBP[['geoindkey', 'state', 'cnty', 'industry', 'geography', 'emp']])
+        if numnaemp>0:
+            print(f"imputeCBP: Number of NAs in emp column is: {numnaemp}")
+        return (imputeCBP[['geoindkey', 'state', 'cnty', 'industry', 'geography', 'emp','agglvl_code']])
 
 
 ####
@@ -175,7 +185,7 @@ def preprocess_rawCBPcnty(raw,supptab=False,suppressionflags=["S", "D"]):
     raw.loc[suppressemp,'emp']=np.nan
     raw.loc[suppresswage,'qp1']=np.nan
 
-    print(f'# raw CBP rows with the same noise flags for wages and employment {raw.loc[raw["emp_nf"]==raw["qp1_nf"],:].shape[0]} ({raw.loc[raw["emp_nf"]==raw["qp1_nf"],:].shape[0]/raw.shape[0]*100:0f}%')
+    print(f'# raw CBP rows with the same noise flags for wages and employment {raw.loc[raw["emp_nf"]==raw["qp1_nf"],:].shape[0]} ({raw.loc[raw["emp_nf"]==raw["qp1_nf"],:].shape[0]/raw.shape[0]*100:.0f}%)')
 
     #unify column names
     raw.rename(columns={"fipstate": "state",
@@ -190,6 +200,8 @@ def preprocess_rawCBPcnty(raw,supptab=False,suppressionflags=["S", "D"]):
     #cntyindic = raw['cnty'].str.contains(r'\d').map(
     #    {True: 70, False: 50})  # [re.match("[0-9]*",fips) for fips in tempraw['fipscty'].tolist]
     raw['agglvl_code'] = [x+72 for x in dignum]
+    #print(f"NUM NA AGGLVL {raw['agglvl_code'].isna().sum()}")
+    raw=raw.loc[raw['agglvl_code'].notna(),:].copy()
 
     if supptab: #make suppression table
         tempraw=raw #save as copy
@@ -243,7 +255,7 @@ def combine_CBP_raw_imputed(rawdf,imputedf=None,generalConfig=None, onlyraw=Fals
         #imputedf = preprocess_imputedCBP(imputedf)
         #combine on geoindkey (keep all rows from imputted value
 
-        cbpdf = imputedf.merge(rawdf,on=["geoindkey","state","cnty","geography","industry"],how="outer",indicator=True,suffixes=["","_raw"],validate="one_to_one")
+        cbpdf = imputedf.merge(rawdf,on=["geoindkey","state","cnty","geography","industry","agglvl_code"],how="outer",indicator=True,suffixes=["","_raw"],validate="one_to_one")
 
         #check the states
         #cbpdf = fill_from_geoindkey(cbpdf)
@@ -301,12 +313,12 @@ def combine_CBP_raw_imputed(rawdf,imputedf=None,generalConfig=None, onlyraw=Fals
         if missing_emp>0:
             raise Exception(f"something wrong missing emp values...{missing_emp}")
         #drop observations in imputed but not Census (these are from unselected states)
-            print("Adjusting missing imputed employment...")
-            cbpdf['_merge']=cbpdf['_merge'].cat.add_categories(['ronly_fill0','ronly_impute'])
-            cbpdf=cbp_mismatch(cbpdf)
-            new_raw_misscount=sum(cbpdf['_merge'] == "right_only")
-            # #Note some columns appear in raw but not imputed.
-            print("After adjustments, in rawCBP but not impute: "+str(raw_misscount))
+            #print("Adjusting missing imputed employment...")
+            #cbpdf['_merge']=cbpdf['_merge'].cat.add_categories(['ronly_fill0','ronly_impute'])
+            #cbpdf=cbp_mismatch(cbpdf)
+            #new_raw_misscount=sum(cbpdf['_merge'] == "right_only")
+            ## #Note some columns appear in raw but not imputed.
+            #print("After adjustments, in rawCBP but not impute: "+str(raw_misscount))
 
     #unify column names
     cbpdf['_merge']=cbpdf['_merge'].str.replace('left_only','impute')
@@ -378,17 +390,18 @@ def read_qwi_co(folderpath,generalConfig):
     lsdf = [] #initialize list
 
     fileexists=False
+    yrqtr_stem=f"yr{generalConfig['YEAR']}_qtr{generalConfig['QTR']}"
     #for files in the specified folder path
     for file in os.listdir(folderpath):
        # if the file name includes "co" in it, read data, preprocess it, add it to the list
-        if "co" in file:
+        if "co" in file and yrqtr_stem in file:
             fileexists=True
             df = pd.read_csv(folderpath+str(file))
             df = preprocess_qwi(df,generalConfig)
             dfnew = df.loc[df['geo_level']=="C"] #make sure this is just county data
             lsdf.append(dfnew)
     if not fileexists:
-        print("No county files with 'co' in the name in QWI folder.")
+        print(f"No county files with 'co' and {yrqtr_stem} in the name in QWI folder.")
     qwidf = pd.concat(lsdf,axis=0,ignore_index=True) #combine all of these
     qwidf.rename({"quarter":"qtr", "county":"cnty","Emp":"emp1_qwi","EmpEnd":"emp3_qwi","sEmp":"semp1_qwi","sEmpEnd":"semp3_qwi"},
                  axis=1, inplace=True,errors="ignore")
@@ -413,11 +426,30 @@ def qcew_format_geoindkey(data_row): #for QCEW
     data_row["industry_code"]=naics_code
     return data_row
 
-def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig,remove_xtra_agglvl=True,suppression_flag="N",rseed=None,naicsdf=None,only_cbp_codes=True):
+def preprocess_qcew(data,combine, generalConfig, preprocessConfig, remove_xtra_agglvl=True,suppression_flag="N",rseed=None,naicsdf=None,only_cbp_codes=True,supptab=False):
     if rseed is not None:
         np.random.seed(rseed)
+    if supptab: #make suppression table
+        tempraw=data.loc[data['agglvl_code'].astype(int)>69,:] #save as copy
+        #dignum=tempraw.industry
+        #get agglvl_code, 51+# digits in naics if state level, +20 more if cnty level.
+
+
+        #get indicator of emp or wage being suppressed
+        tempraw['suppressed']=tempraw["disclosure_code"].notna()
+        tempraw['agglvl']=tempraw['agglvl_code'].astype(str)
+        supptabtemp=pd.crosstab(tempraw['agglvl'], tempraw['suppressed']).join(pd.crosstab(tempraw['agglvl'], tempraw['suppressed'],normalize="index"),
+                                                                                on="agglvl",how='outer',lsuffix='_count',rsuffix='_prop',sort=True)
+
+
+        supptabfull=pd.DataFrame({'agglvl':supptabtemp.index.values,'n_cells':supptabtemp['True_count'].add(supptabtemp['False_count']).values,
+                                  'suppressed':supptabtemp['True_count'].values,"%suppressed":supptabtemp["True_prop"].multiply(100).round(0).values})#.join(supptabemp,on='agglvl_code',how='outer',lsuffix='_wages',rsuffix='_emp')
+        supptabfull.set_index('agglvl')
     if remove_xtra_agglvl:
         keepagglvls=combine['agglvl_code'].unique()
+        #print(keepagglvls)
+        #print(combine.columns)
+        #print(combine.loc[combine["agglvl_code"].isna(),:].head())
         print("Only keeping QCEW aggregate level codes in CBP/QWI combined data :"+', '.join([str(int(x)) for x in keepagglvls]))
         data=data[data['agglvl_code'].astype(float).isin(keepagglvls)]
 
@@ -486,6 +518,13 @@ def preprocess_qcew(data,combine, generalConfig, preprocessConfig, quarterConfig
         #temp['cat']=temp['_merge'].astype(str)
         #temp.loc[(temp['cat']=="qcew_only")&(temp['industry'].isin(excluded_cbp)),'cat']="qcew_only_excluded_cbp"
         xtabs=pd.crosstab(temp["agglvl"], temp["row_sources"])
+        with open(preprocessConfig['OUTPATH'] + preprocessConfig["DIAGNOSTIC_FILE"], 'a') as f:
+            if supptab:
+                print("--" * 20, file=f)
+                print("------- QCEW Suppression Table -------", file=f)
+                print("--" * 20, file=f)
+        if supptab:
+            write_pipe_table(df=supptabfull, filename=preprocessConfig['OUTPATH'] + preprocessConfig["DIAGNOSTIC_FILE"], include_index=False)
         with open(preprocessConfig['OUTPATH'] + preprocessConfig["DIAGNOSTIC_FILE"], 'a') as f:
             print("--" * 20, file=f)
             print("----- Merging QCEW Data with Combined CBP and QWI Tables -----", file=f)
@@ -558,7 +597,7 @@ def preadjustments_combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalCo
     qwi=qwi.loc[qwi['state'].astype(str).isin([str(st) for st in allowedstates]),:].copy()
 
     #change suppressed cells to NA
-    flagCols = ["semp1_qwi", "semp3_qwi", "sEmpS", "sEarnBeg"]
+    flagCols = ["semp1_qwi", "semp3_qwi", "sEarnBeg"]
     iter=0
     qwi['agglvl']=qwi['agglvl_code'].astype(str)+"_lvl"
     for fcol in flagCols:
@@ -722,16 +761,23 @@ def preadjustments_combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalCo
 
         #read qcew
         qcew = pd.read_csv(preprocessConfig['DATA_IN_FOLDER']+preprocessConfig["QCEWDIR"] + "qcew_part.csv")
-        fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig,quarterConfig,naicsdf=naicsdf,only_cbp_codes=only_cbp_codes)
+        fullcombine = preprocess_qcew(qcew, combinedf, generalConfig, preprocessConfig,quarterConfig,naicsdf=naicsdf,only_cbp_codes=only_cbp_codes, supptab=True)
 
         #fullcombine=fullcombine[fullcombine['estnum_cbp'].notna()].copy()
-        if outfilename is None:
+        if outfilename is None and generalConfig['COMBINED_DATA'] is None:
             print(f'Not saving combined data to a csv. No filepath provided.')
         elif outfilepath is not None:
-            if outfilepath in outfilename:
+            if outfilename is not None and outfilepath in outfilename:
                 fullcombine.to_csv(outfilename)
-            else:
+            elif outfilename is not None:
                 fullcombine.to_csv(outfilepath + outfilename)
+            elif generalConfig['COMBINED_DATA'] is not None and outfilepath in generalConfig['COMBINED_DATA']:
+                fullcombine.to_csv(generalConfig['COMBINED_DATA'])
+            elif generalConfig['COMBINED_DATA'] is not None:
+                fullcombine.to_csv(outfilepath + generalConfig['COMBINED_DATA'])
+
+        elif generalConfig['COMBINED_DATA'] is not None:
+            fullcombine.to_csv(generalConfig['COMBINED_DATA'])
         else:
             fullcombine.to_csv(outfilename)
     return(fullcombine)
@@ -749,13 +795,39 @@ def preadjustments_combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalCo
 #       preprocessConfig, generalConfig, and quarterConfig are configurations from config file used for this process.
 #               If quarterConfig=None, defaults are used.
 # OUTPUTS: pd.dataframe of combined CBP, QCEW, and QWI
-def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1,suppressedqwi=5,only_cbp_codes=True,naicsdf=None):
+def combine_qwi_cbp_qcew(rawfile, imputedfile,qwifolder,generalConfig,preprocessConfig,quarterConfig=None,supplementaryConfig=None, outfilename="combineFull.csv",diagnosticsfile=None,outfilepath="PythonPreprocessOut",year=2016,notsuppressedqwi=1,suppressedqwi=5,only_cbp_codes=True,naicsdf=None):
     df=preadjustments_combine_qwi_cbp_qcew(rawfile, imputedfile, qwifolder, generalConfig, preprocessConfig,
                                         quarterConfig=quarterConfig, outfilename=None, diagnosticsfile=diagnosticsfile,
                                         outfilepath=outfilepath, year=year, notsuppressedqwi=notsuppressedqwi,
                                         suppressedqwi=suppressedqwi, only_cbp_codes=only_cbp_codes, naicsdf=naicsdf)
+    if supplementaryConfig is not None:
+        print('---------- Supplementary Data Configuration ----------')
+        # Display all current employmentConfig settings
+        for key, value in supplementaryConfig.items():
+            print(f"{key}: {value}")
+
+        del key, value
+        if 'COUNTY_DATA' in supplementaryConfig:
+            if supplementaryConfig['COUNTY_DATA_SEP']=="tab" or supplementaryConfig['COUNTY_DATA_SEP']=="\t":
+                cntydata=pd.read_csv(supplementaryConfig['DATA_IN_FOLDER']+supplementaryConfig["COUNTY_DATA"],sep='\t')
+            else:
+                cntydata = pd.read_csv(supplementaryConfig['DATA_IN_FOLDER'] + supplementaryConfig["COUNTY_DATA"])
+            cntydata[supplementaryConfig['COUNTY_FIPS_COLNAME']]=pd.to_numeric(cntydata[supplementaryConfig["COUNTY_FIPS_COLNAME"]],errors="coerce").round(0).astype(int).astype(str)
+            df['geography']=df['geoindkey'].str.extract(r'^([^_]+)')#split['_'].str[0]
+            df=df.merge(cntydata,right_on=supplementaryConfig['COUNTY_FIPS_COLNAME'],left_on="geography",how="left")
+        if 'STATE_DATA' in supplementaryConfig:
+            if supplementaryConfig['STATE_DATA_SEP']=="tab" or supplementaryConfig['STATE_DATA_SEP']=="\t":
+                stdata=pd.read_csv(supplementaryConfig['DATA_IN_FOLDER']+supplementaryConfig["STATE_DATA"],sep='\t')
+            else:
+                stdata = pd.read_csv(supplementaryConfig['DATA_IN_FOLDER'] + supplementaryConfig["STATE_DATA"])
+            stdata[supplementaryConfig['STATE_FIPS_COLNAME']]=pd.to_numeric(cntydata[supplementaryConfig["STATE_FIPS_COLNAME"]],errors="coerce").round(0).astype(int).astype(str)
+            df['state']=df['geoindkey'].str.extract(r'^([^_]+)').str.slice(stop=-3)#split['_'].str[0]
+            df=df.merge(stdata,right_on=supplementaryConfig['STATE_FIPS_COLNAME'],left_on="state",how="left")
+        if 'INDUSTRY_DATA' in supplementaryConfig:
+            print(f'Current algorithm does not support industry supplementary data.\n The input {supplementaryConfig["INDUSTRY_DATA"]} will be ignored.')
+
     fullcombine=combined_adjustments(df=df, generalConfig=generalConfig, quarterConfig=quarterConfig, rseed=None, adjustforsource_estnum=True, naicsdf=naicsdf,
-                         base_data="cbp")
+                         base_data="qcew")
     if outfilename is None:
         print(f'Not saving combined data to a csv. No filepath provided.')
     elif outfilepath is not None:
@@ -778,6 +850,11 @@ def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustfo
         print("Adjusting the values of CBP to match quarter "+str(generalConfig["QTR"]))
         melddf = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=quarterConfig,
                                        adjust_source=False, rseed=rseed)
+        melddf = quarter_source_adjustment(melddf, generalConfig, "emp3", quarterConfig=quarterConfig,
+                                           adjust_source=False, rseed=rseed)
+        melddf = quarter_source_adjustment(melddf, generalConfig, "estnum_cbp",quarterConfig=None,
+                                       formula="estnum_qcew~estnum_cbp+naics2+agglvl_code",
+                                       adjust_source=True, source="CBP", rseed=rseed)
 
     if base_data == "cbp":
         melddf['estnum'] = melddf["estnum_cbp"]
@@ -788,19 +865,23 @@ def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustfo
     elif base_data == "qcew":
         melddf['estnum'] = melddf["estnum_qcew"]
         melddf.loc[melddf["estnum"].notna(),'estnum_source'] = "qcew"
+        noqcew=(melddf['estnum_qcew'].isna())
+        yescbp=(melddf["estnum_cbp"].notna())
+        melddf.loc[(noqcew)&(yescbp),"estnum"]=melddf.loc[(noqcew)&(yescbp),"estnum_cbp"]
+        melddf.loc[(noqcew)&(yescbp),"estnum_source"]="cbp"
         melddf = melddf.loc[melddf['estnum'].notna(),].copy()
     melddf = melddf.loc[melddf['row_sources'] != "qwi_only", :]
 
 
     ## Adjust values
     #print("Using QCEW when available...")
-    for vname in ["estnum", "emp3", "emp2", "emp1", "wages"]:
-        if base_data=="cbp" and vname=="estnum":
+    for vname in ["emp3", "emp2", "emp1", "wages"]:
+        if base_data=="cbp":
             pass
         else:
             melddf[vname] = melddf[vname + "_qcew"]
             melddf[vname + "_source"] = ""
-            melddf.loc[~melddf[vname].isna(), vname + "_source"] = "qcew"
+            melddf.loc[melddf[vname].notna(), vname + "_source"] = "qcew"
 
     if adjustforsource_estnum and adjustforsource_regression:
         print("Cannot use regression and average per establishment adjustments together. Defaults to regression adjustment.")
@@ -808,14 +889,14 @@ def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustfo
     ## Use regression to adjust for the source
     if adjustforsource_regression:
         df = quarter_source_adjustment(melddf, generalConfig, "wages", quarterConfig=None,
-                                   formula="wages~wages_cbp+np.log(estnum_cbp)+np.log(estnum_qcew)",
+                                   formula="wages~wages_cbp+np.log10(estnum_cbp)+np.log10(estnum_qcew)",
                                    adjust_source=True, source="CBP", rseed=rseed)
         #print("When QCEW emp1 and emp3 are not available, use QWI and then CBP.")
         #for source in ["QWI","CBP"]:
         #havepredictor_noresponse=df[(~df.loc[:,"emp3_"+source.lower()].isna())&(df['emp3'].isna()),:]
         if sum((~df.loc[:,"emp3_cbp"].isna())&(df['emp3'].isna()))>0:
             df = quarter_source_adjustment(df, generalConfig, "emp3", quarterConfig=None,
-                                       formula="emp3~emp3_cbp+np.log(estnum_cbp)+np.log(estnum_qcew)",
+                                       formula="emp3~emp3_cbp+np.log10(estnum_cbp)+np.log10(estnum_qcew)",
                                        adjust_source=True, source="CBP", rseed=rseed)
         if sum((~df.loc[:,"emp3_qwi"].isna())&(df['emp3'].isna()))>0:
             df = quarter_source_adjustment(df, generalConfig, "emp3", quarterConfig=None,
@@ -837,8 +918,7 @@ def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustfo
         df["emp1_perestnum_qcew"] = df["emp1_qcew"] / df["estnum_qcew"]
         df["emp1_perestnum_qwi"] = df["emp1_qwi"] / df["estnum_qcew"]
         df["emp3_perestnum_qwi"] = df["emp3_qwi"] / df["estnum_qcew"]
-        df["emp2_perestnum_qcew"] = df["emp2_qcew"] / df["estnum_qcew"]
-        df["emp2_perestnum"] = df["emp2_perestnum_qcew"]
+        df["emp2_perestnum"] = df["emp2_qcew"] / df["estnum_qcew"]
         #df = avgestnum_source_adjustment(df)
         for vname in ["emp3", "emp1", "wages"]:
             df[vname + "_perestnum"] = df[vname + "_perestnum_qcew"]
@@ -857,16 +937,19 @@ def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustfo
             # havepredictor_noresponse=df[(~df.loc[:,"emp3_"+source.lower()].isna())&(df['emp3'].isna()),:]
             if sum((~df.loc[:, "emp3_" + source.lower()].isna()) & (df['emp3'].isna())) > 0:
                 sourceavail = df["emp3_" + source.lower()].notna()
-                df.loc[(sourceavail) & (df['emp3'].isna()), "emp3_perestnum"] = df.loc[(sourceavail) & (df['emp3'].isna()), "emp3_perestnum_" + source.lower()]
-                df.loc[(sourceavail) & (df['emp3'].isna()), "emp3_source"] = source.lower()
+                emp3na=df['emp3'].isna()
+                df.loc[(sourceavail) & (emp3na), "emp3_perestnum"] = df.loc[(sourceavail) & (emp3na), "emp3_perestnum_" + source.lower()]
+                df.loc[(sourceavail) & (emp3na), "emp3_source"] = source.lower()
 
         if sum((df["emp1"].isna()) & (~df["emp1_qwi"].isna())) > 0:
             sourceavail = df["emp1_qwi"].notna()
-            df.loc[(sourceavail) & (df['emp1'].isna()), "emp1_perestnum"] = df.loc[(sourceavail) & (df['emp1'].isna()), "emp1_perestnum_qwi"]
-            df.loc[(sourceavail) & (df['emp1'].isna()), "emp1_source"] = "qwi"
+            emp1na = df['emp1'].isna()
+
+            df.loc[(sourceavail) & (emp1na), "emp1_perestnum"] = df.loc[(sourceavail) & (emp1na), "emp1_perestnum_qwi"]
+            df.loc[(sourceavail) & (emp1na), "emp1_source"] = "qwi"
         df['year_qtr'] = df['year'].astype(float) + (df["qtr"].astype(float) / 4)
 
-        df=avgestnum_source_adjustment(df.loc[df['emp3_perestnum'].notna(),:],keep_only_filled_emp3=keep_only_emp3_filled,naicsdf=naicsdf)
+        df=avgestnum_source_adjustment(df.loc[df['emp3_perestnum'].notna(),:],naicsdf=naicsdf)
     else: #no adjustments...
         cbpavail=melddf["wages_cbp"].notna()
         noqcewwages=melddf['wages'].isna()
@@ -880,15 +963,18 @@ def combined_adjustments(df,generalConfig,quarterConfig=None,rseed=None,adjustfo
             # havepredictor_noresponse=df[(~df.loc[:,"emp3_"+source.lower()].isna())&(df['emp3'].isna()),:]
             if sum((~df.loc[:, "emp3_" + source.lower()].isna()) & (df['emp3'].isna())) > 0:
                 cbpavail = df["emp3_"+source.lower()].notna()
-                df.loc[(cbpavail) & (df['emp3'].isna()), "emp3"] = melddf.loc[
-                    (cbpavail) & (df['emp3'].isna()), "emp3_"+source.lower()]
-                df.loc[(cbpavail) & (df['emp3'].isna()), "emp3_source"] = source.lower()
+                emp3na=df['emp3'].isna()
+                df.loc[(cbpavail) & (emp3na), "emp3"] = melddf.loc[
+                    (cbpavail) & (emp3na), "emp3_"+source.lower()]
+                df.loc[(cbpavail) & (emp3na), "emp3_source"] = source.lower()
 
         if sum((df["emp1"].isna()) & (~df["emp1_qwi"].isna())) > 0:
             cbpavail = df["emp1_qwi"].notna()
-            df.loc[(cbpavail) & (df['emp1'].isna()), "emp1"] = melddf.loc[
-                (cbpavail) & (df['emp1'].isna()), "emp1_qwi"]
-            df.loc[(cbpavail) & (df['emp1'].isna()), "emp1_source"] = "qwi"
+            emp1na = df['emp1'].isna()
+
+            df.loc[(cbpavail) & (emp1na), "emp1"] = melddf.loc[
+                (cbpavail) & (emp1na), "emp1_qwi"]
+            df.loc[(cbpavail) & (emp1na), "emp1_source"] = "qwi"
         df['year_qtr']=df['year'].astype(float)+(df["qtr"].astype(float)/4)
 
     return df

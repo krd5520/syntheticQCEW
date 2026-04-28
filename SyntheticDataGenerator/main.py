@@ -29,11 +29,13 @@ def start(config):
     readinData=0
     createCombined=0
     NAICS6time=0
-    generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementaryConfig = check_config(config)
+    generalConfig, microdataConfig, preprocessConfig, employmentConfig, wageConfig,supplementaryConfig, quarterConfig  = check_config(config)
     startime=time.time()
     print('---------- -------- -------- -------- ----------')
     print('---------- Retrieving or Loading Data ----------')
     print('---------- -------- -------- -------- ----------')
+    #print(np.random.dirichlet(np.array([3,4,5,6,7,8]),4))
+    #print(np.transpose(np.random.dirichlet(np.array([3,4,5,6,7,8]),4)))
     if generalConfig.get("NAICS_FILE") is not None:
         naicsdf = process_naics_file(generalConfig["NAICS_FILE"], code_col=naics_file_code_col, code_sep=naics_file_sep)
     else:
@@ -50,13 +52,19 @@ def start(config):
     else:
         if os.path.exists(generalConfig['COMBINED_DATA']) and os.path.isfile(generalConfig['COMBINED_DATA']):
             print("Reading combined dataset from "+str(generalConfig['COMBINED_DATA']))
-            df=pd.read_csv(generalConfig['COMBINED_DATA'],
-                           usecols=['agglvl_code', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
-                                    'emp3', 'emp2', 'emp1', 'wages',"year","qtr", 'emp1_source',"emp2_source","emp3_source",
-                                    "wages_source","geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
-                                    "domain","supersector","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag",'row_sources'],
-                           low_memory=True
-                           )
+            try: #try using high memory to preserve data types...
+                df=pd.read_csv(generalConfig['COMBINED_DATA'],low_memory=False)
+            except: #otherwise automatically convert numeric columns
+                df = pd.read_csv(generalConfig['COMBINED_DATA'],dtype=str) #all as string
+                catcols= ['state','geoindkey','geography','industry','cnty','county','county_name',
+                          'naics2','naics3','naics4','naics5','sector','supersector','domain',
+                          'row_sources','emp1_source','emp2_source','emp3_source','wages_source','estnum_source',
+                          'geo2naics','geo3naics','geo4naics','geo5naics','description','disclosure_code']
+                for cname in df.columns:
+                    if lower(cname) not in catcols: #if not in known categorical column names
+                        check_all_numeric=pd.to_numeric(df[cname],errors='coerce').notna().all() #True if all rows in column are numeric
+                        if check_all_numeric:
+                            df[cname]=pd.to_numeric(df[cname])
             readinData=time.time()-startime
         elif preprocessConfig is not None:
             print("Combining CBP and QWI datasets.")
@@ -98,25 +106,28 @@ def start(config):
                                     diagnosticsfile=preprocessConfig["DIAGNOSTIC_FILE"],
                                     generalConfig=generalConfig,
                                     preprocessConfig=preprocessConfig,
+                                    quarterConfig=quarterConfig,
+                                    supplementaryConfig=supplementaryConfig,
                                outfilepath=preprocessConfig['OUTPATH'],
                                year=generalConfig['YEAR'],
                                     naicsdf=naicsdf)
-            master_colsave=['agglvl_code','emp3_cbp','wages_cbp','estnum_cbp',
-                 'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
-                 'emp3', 'emp2', 'emp1', 'wages', 'year_qtr',"year","qtr","estnum",
-                   'emp1_source',"emp2_source","emp3_source","wages_source",
-                   "geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
-                   "emp1_qwi","emp1_qcew","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag","row_sources","geo2naics","geo3naics","geo4naics","geo5naics"]
-            if "supersector" in df.columns:
-                colssave=master_colsave+["domain","supersector"]
-            else:
-                colssave=master_colsave
+            #master_colsave=['agglvl_code','emp3_cbp','wages_cbp','estnum_cbp',
+            #     'emp1_qwi', 'emp3_qwi', 'lwbd_emp_qwi', 'avg_month_emp_wages', 'estnum',
+            #     'emp3', 'emp2', 'emp1', 'wages', 'year_qtr',"year","qtr","estnum",
+            #       'emp1_source',"emp2_source","emp3_source","wages_source",
+            #       "geoindkey","industry","state","cnty","naics2","naics3","naics4","naics5",
+            #       "emp1_qwi","emp1_qcew","wages_cbp_flag","emp3_cbp_flag","emp3_qwi_flag","row_sources","geo2naics","geo3naics","geo4naics","geo5naics"]
+            #if "supersector" in df.columns:
+            #    colssave=master_colsave+["domain","supersector"]
+            #else:
+            #    colssave=master_colsave
 
-            df=df[colssave].copy()
+            #df=df[colssave].copy()
             print("Combined file is saved: "+str(generalConfig['COMBINED_DATA']))
             createCombined=time.time()-createcombinedstart
             df = pd.read_csv(generalConfig['COMBINED_DATA'],
-                             usecols=colssave,low_memory=True
+                             #usecols=colssave,
+                             low_memory=True
                              )
 
         #df['year_qtr']=df['year'].astype(float)+(df["qtr"].astype(float)/4)
@@ -146,6 +157,7 @@ def start(config):
         print('---------- Getting Complete County by NAICS-6 Data ----------')
         print('---------- -------- -------- -------- ----------\n')
         startNAICS6=time.time()
+
         naics6df=generate_NAICS6_byCounty(generalConfig, employmentConfig, wageConfig,supplementaryConfig=supplementaryConfig, df=df,naicsdf=naicsdf)
         NAICS6time=time.time()-startNAICS6
         print(f'---------- Complete County by NAICS-6 Done: Time {NAICS6time} ----------')
@@ -200,7 +212,7 @@ def main():
 
 if __name__ == "__main__":
     #main()
-    with open("config_pre2017.yaml", 'r') as configFile:
+    with open("DataDiag/param_model_select/param_select_config.yaml",'r') as configFile:#config_pre2017.yaml", 'r') as configFile:
         config = yaml.safe_load(configFile)
 
-    start("config_pre2017.yaml")
+    start("DataDiag/param_model_select/param_select_config.yaml")#"config_pre2017.yaml")

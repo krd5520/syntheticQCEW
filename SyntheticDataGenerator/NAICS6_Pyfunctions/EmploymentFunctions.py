@@ -16,7 +16,7 @@ from GeneralFunctions import *
 #     employmentConfig = config['employmentConfig']
 pd.set_option('mode.chained_assignment', None)
 
-def get_m1emp_model(df,employmentConfig):
+def get_m1emp_model(df,employmentConfig,return_text=False,modelname=None,quietly=False):
     '''
     What is the point?
         get_m1emp_model() creates an OLS model that predicts employment values ('Emp') based on various
@@ -52,22 +52,78 @@ def get_m1emp_model(df,employmentConfig):
         diagplot = None
 
     if "emp1diff" in employmentConfig['OLS_FORMULA']:
-        if employmentConfig['OLS_FORMULA'].startswith("np.log") or employmentConfig['OLS_FORMULA'].startswith("np.sqrt"):
-            model = get_model(df.loc[(df['emp1_missing6by4'] > 0)&(df['emp1diff']>0), :], employmentConfig['OLS_FORMULA'],
-                              employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'],
-                              diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
-                              return_summary_and_diagnostics=False)
+        if employmentConfig['OLS_FORMULA'].startswith("np.log(") or employmentConfig['OLS_FORMULA'].startswith("np.sqrt") or employmentConfig['OLS_FORMULA'].startswith("np.log10"):
+            modeldf=df.loc[(df['emp1_missing6by4'] > 0)&(df['emp1diff']>0), :]
+        elif employmentConfig['OLS_FORMULA'].startswith("np.log1p("):
+            modeldf=df.loc[(df['emp1_missing6by4'] > 0) & (df['emp1diff'] >= 0), :]
         else:
-            model = get_model(df.loc[df['emp1_missing6by4']>0,:], employmentConfig['OLS_FORMULA'], employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'],
-                          diagnostic_plots=diagplot, output_removed=False, include_multicolinearity=True,
-                          return_summary_and_diagnostics=False)
+            modeldf=df.loc[df['emp1_missing6by4'] > 0, :]
     else:
-        model=get_model(df, employmentConfig['OLS_FORMULA'], employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'], diagnostic_plots=diagplot, output_removed=False,include_multicolinearity=True,
-                  return_summary_and_diagnostics=False)
-    print(model.summary())
+        modeldf=df.copy()
+    # if return_text and diagplot is not None:
+    #     modout = get_model(modeldf, employmentConfig['OLS_FORMULA'],
+    #                                employmentConfig['COOKS_THRESH'], employmentConfig['OUTLIER_THRESH'],
+    #                                diagnostic_plots=diagplot, output_removed=True, include_multicolinearity=True,
+    #                                return_summary_and_diagnostics=True,
+    #                                quietly=quietly)
+    #     print(len(modout))
+    #     model, outtext, modsummary, fitvals, residvals=modout
+    #     if employmentConfig['OLS_FORMULA'].startswith("np.sqrt("):
+    #         y_pred=fitvals**2
+    #     elif employmentConfig['OLS_FORMULA'].startswith("np.log10("):
+    #         y_pred=np.power(10,fitvals)
+    #     elif employmentConfig['OLS_FORMULA'].startswith("np.log1p("):
+    #         y_pred=np.exp(fitvals)-1
+    #     elif employmentConfig['OLS_FORMULA'].startswith("np.log("):
+    #         y_pred=np.exp(fitvals)
+    #     else:
+    #         y_pred=fitvals
+    #     if "emp1diff" in employmentConfig["OLS_FORMULA"]:
+    #         y_pred=y_pred+modeldf['emp1_sum6by4']
+    #
+    #     influence = OLSInfluence(model)
+    #     n = int(model.nobs)
+    #
+    #     cooks_d = influence.cooks_distance[0]
+    #     stud_resid = influence.resid_studentized_internal
+    #
+    #     # if cook_threshold is None:
+    #     #    cook_threshold = 4 / n
+    #
+    #     obs_index = np.arange(n)
+    #     cook_threshold=employmentConfig["COOKS_THRESH"]
+    #     stud_threshold=employmentConfig["OUTLIER_THRESH"]
+    #     if cook_threshold is not None:
+    #         cook_outliers = obs_index[cooks_d > cook_threshold]
+    #     else:
+    #         cook_outliers = None
+    #     if stud_threshold is not None:
+    #         stud_outliers = obs_index[np.abs(stud_resid) > stud_threshold]
+    #     else:
+    #         stud_outliers = None
+    #
+    #     plot_regression_fit(modeldf, fitmodel=None, y_pred=y_pred, y_col="emp1",
+    #                         filename=diagplot.replace(".","_transformed_fit_vs_obs_outliers_marked."),
+    #                         cook_outliers=cook_outliers,
+    #                         stud_outliers=stud_outliers)
+    #
+    #else:
+    model, outtext = get_model(modeldf, employmentConfig['OLS_FORMULA'],
+                                                       employmentConfig['COOKS_THRESH'],
+                                                       employmentConfig['OUTLIER_THRESH'],
+                                                       diagnostic_plots=diagplot, output_removed=True,
+                                                       include_multicolinearity=True,
+                                                       return_summary_and_diagnostics=False,
+                                                       quietly=quietly,modelname=modelname)
 
 
-    # if "emp1diff" in employmentConfig['OLS_FORMULA']:
+
+    if ~quietly:
+        print(model.summary())
+
+
+
+
     #     modeldf=df.loc[(df['emp1_missing6by4']>0),:]
     #     #modeldf=modeldf.loc[(modeldf['emp1diff']>0)&(modeldf['emp3']>=0),:]
     # else:
@@ -75,7 +131,10 @@ def get_m1emp_model(df,employmentConfig):
     # model = get_model(modeldf,employmentConfig['OLS_FORMULA'],employmentConfig['COOKS_THRESH'],employmentConfig['OUTLIER_THRESH'],diagnostic_plots=diagplots,output_removed=False,include_multicolinearity=True,return_summary_and_diagnostics=False)#.OLS(y, X).fit()
     # print(model.summary())
     # # end. return fitted model.
-    return model
+    if return_text:
+        return model, outtext
+    else:
+        return model
 
 def check_lwbd_emp_qwi(empvals, stablevals):
     '''
@@ -152,42 +211,61 @@ def get_m1emp(df, m1empmodel, rseed=None, include_indicator=False):
     # Identify rows to be imputed
     missm1indicator = df["emp1"].isna()
     if 'estnum_emp1_missing6by4' in df.columns:
+        #print(df['estnum_emp1_missing6by4'].describe())
+
         nomissingestnum=(df['estnum_emp1_missing6by4']==0)
-        df.loc[(missm1indicator)&(nomissingestnum),'emp1']=df.loc[(missm1indicator)&(nomissingestnum),'emp1_sum6by4']
+        #nomissingcell=(df['emp1_missing6by4'])
+        #df.loc[(missm1indicator)&(nomissingestnum|nomissingcell),'emp1']=df.loc[(missm1indicator)&(nomissingestnum|nomissingcell),'emp1_sum6by4']
+        df.loc[(missm1indicator) & (nomissingestnum), 'emp1'] = df.loc[(missm1indicator) & (nomissingestnum), 'emp1_sum6by4']
+        missm1indicator = df["emp1"].isna()
+    if 'emp1_missing6by4' in df.columns:
+        #print(df['emp1_missing6by4'].describe())
+        #nomissingestnum = (df['estnum_emp1_missing6by4'] == 0)
+        nomissingcell=(df['emp1_missing6by4']==0)
+        df.loc[(missm1indicator)&(nomissingcell),'emp1']=df.loc[(missm1indicator)&(nomissingcell),'emp1_sum6by4']
         missm1indicator = df["emp1"].isna()
 
     missingsub = df[missm1indicator]
-    # Get model predictions and standard errors for missing values
-    predm1emp, sem1emp= custom_predict(missingsub, m1empmodel)
+    if missm1indicator.sum()>0:
 
-    ##check index is now filled
-    predidx=predm1emp[predm1emp.notna()].index.values
-    missingidx=missingsub.index.values
+        #print(missingsub.head())
+        # Get model predictions and standard errors for missing values
+        predm1emp, sem1emp= custom_predict(missingsub, m1empmodel)
+
+        ##check index is now filled
+        predidx=predm1emp[predm1emp.notna()].index.values
+        missingidx=missingsub.index.values
 
 
-    if set(predidx)!=set(missingidx):
-        print(f'Something wrong: some of the {len(missingidx)} missing emp1 values have not been filled by the {len(predidx)} prediction values. Printing head of unfilled missing values...')
-        print(df.loc[list(set(missingidx)-set(predidx)),["state","naics2","estnum","emp3","emp3_source","emp1_sum6by4","emp1_missing6by4","emp1"]].head())
+        if set(predidx)!=set(missingidx):
+            print(f'Something wrong: some of the {len(missingidx)} missing emp1 values have not been filled by the {len(predidx)} prediction values. Printing head of unfilled missing values...')
+            print(df.loc[list(set(missingidx)-set(predidx)),["state","naics2","estnum","emp3","emp3_source","emp1_sum6by4","emp1_missing6by4","emp1","Population_2010","estnum_emp1_missing6by4"]].head())
 
-    # Generate predicted values with random noise based on standard errors
-    m1empfit = np.random.normal(
-        loc=predm1emp, # Center at predicted values
-        scale=sem1emp, # Scale by prediction uncertainty
-        size=sum(missm1indicator)
-    )
-    response = m1empmodel.model.endog_names
-    if "np.sqrt" in response:
-        m1empfit=m1empfit**2
-    elif "np.log" in response:
-        m1empfit=np.exp(m1empfit)
+        # Generate predicted values with random noise based on standard errors
+        m1empfit = np.random.normal(
+            loc=predm1emp, # Center at predicted values
+            scale=sem1emp, # Scale by prediction uncertainty
+            size=sum(missm1indicator)
+        )
+        response = m1empmodel.model.endog_names
+        if "np.sqrt" in response:
+            m1empfit=m1empfit**2
+        elif "np.log10" in response:
+            m1empfit=np.power(10,m1empfit)
+        elif "np.log1p" in response:
+            m1empfit=np.exp(m1empfit)-1
+        elif "np.log" in response:
+            m1empfit=np.exp(m1empfit)
 
-    if "emp1diff" in response:
-        m1empfit=m1empfit+missingsub['emp1_sum6by4']
-    # Ensure no negative employment and validate against stable values
+        if "emp1diff" in response:
+            m1empfit=m1empfit+missingsub['emp1_sum6by4']
+        # Ensure no negative employment and validate against stable values
 
-    m1empfit[m1empfit < 0] = 0
-    m1emp[missm1indicator]=m1empfit
-    m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"])
+        m1empfit[m1empfit < 0] = 0
+        m1emp[missm1indicator]=m1empfit
+    if missingsub.shape[0]>0:
+        if "lwbd_emp_qwi" in missingsub.columns:
+            m1emp[missm1indicator] = check_lwbd_emp_qwi(m1empfit, missingsub["lwbd_emp_qwi"])
     #m1emp[missm1indicator]=adjust_varvalues(m1emp[missm1indicator], dfmaxmin, stabvals=None, variable="emp1")
     # Round to whole numbers
     output = np.round(m1emp.astype(float), 0)
@@ -242,10 +320,10 @@ def get_m2emp(m1emp, m3emp, stabval, noisecoef, rseed=None):
     m3emp_nz = m3emp[nonzeroindic]
     # Calculate SD for noise
     # Proportional to employment change relative to mean employment
-    noisesd = np.sqrt((noisecoef * 2 * np.abs(m1emp_nz - m3emp_nz)) / (m1emp_nz + m3emp_nz))
+    noisesd = np.sqrt((noisecoef * (np.abs(m1emp_nz - m3emp_nz)+(0.5*(m1emp_nz + m3emp_nz)))))
     # Generate random noise and add to midpoint of m1 and m3emp
     changeFromMid = np.random.normal(0, noisesd)
-    m2emp_nz = m1emp_nz + ((m3emp_nz - m1emp_nz) / 2) + changeFromMid
+    m2emp_nz = m3emp_nz + changeFromMid
     m2emp[nonzeroindic] = m2emp_nz
     #Handle negative values and consult check_lwbd_emp_qwi()
     m2emp[m2emp < 0] = np.where((m1emp[m2emp < 0] == 0) | (m3emp[m2emp < 0] == 0), 0, 1)
@@ -288,7 +366,10 @@ def get_employmentCounts4(df4,m1emp_model, m2emp_noisecoef, rseed=None, include_
         m1emp = get_m1emp(df=df4, m1empmodel=m1emp_model, include_indicator=False)
     m3emp=df4['emp3']
 
-    m2emp = get_m2emp(m1emp, m3emp, df4['lwbd_emp_qwi'].values, noisecoef=m2emp_noisecoef)
+    if 'lwbd_emp_qwi' in df4.columns:
+        m2emp = get_m2emp(m1emp, m3emp, df4['lwbd_emp_qwi'].values, noisecoef=m2emp_noisecoef)
+    else:
+        m2emp = get_m2emp(m1emp, m3emp, [0]*len(m1emp), noisecoef=m2emp_noisecoef)
     empMat = pd.DataFrame({
     'geoindkey': df4['geoindkey'],
     'm1emp': m1emp,
