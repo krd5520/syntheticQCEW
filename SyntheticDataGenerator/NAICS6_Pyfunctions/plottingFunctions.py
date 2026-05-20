@@ -286,7 +286,7 @@ def plot_outlier_diagnostics(model, title,cook_threshold=None, stud_threshold=No
 
 
 #Function produced with AI assistance
-def plot_hist_with_normal(series, filename="histogram.png", bins=30,title_stem=None):
+def plot_hist_with_normal(series, filename="histogram.png", bins=30,title_stem=None,figsize=(8,5),fontsizes=[9,10,9]):
         """
         Plot a histogram of a pandas Series with a normal density curve overlay.
 
@@ -303,32 +303,36 @@ def plot_hist_with_normal(series, filename="histogram.png", bins=30,title_stem=N
         std = series.std()
 
         # Create histogram
-        plt.figure(figsize=(8, 5))
+        plt.figure(figsize=figsize)
         count, bins_edges, _ = plt.hist(series, bins=bins, density=True, alpha=0.6, color='steelblue', edgecolor='black')
 
         # Create normal density curve
         x = np.linspace(series.min(), series.max(), 200)
         y = stats.norm.pdf(x, mean, std)
-        plt.plot(x, y, 'r-', linewidth=2, label='Normal PDF')
+        plt.plot(x, y, 'r-', linewidth=2, label=f'Normal PDF')
 
         # Add labels and title
-        plt.xlabel("Value")
-        plt.ylabel("Density")
+        plt.xlabel("Value",fontsize=fontsizes[1])
+        plt.ylabel("Density",fontsize=fontsizes[1])
+
+        plt.xticks(fontsize=fontsizes[0])
+        plt.yticks(fontsize=fontsizes[0])
         if title_stem is not None:
-            plt.title(f"{title_stem} (Normal Curve mean={mean:.2f}, std={std:.2f})",wrap=True)
+            plt.title(f"{title_stem}\n(Normal Curve mean={mean:.2f}, std={std:.2f})",wrap=True,fontsize=fontsizes[2])
         else:
-            plt.title(f"Histogram with Normal Curve (mean={mean:.2f}, std={std:.2f})",wrap=True)
+            plt.title(f"Histogram with Normal Curve\n(mean={mean:.2f}, std={std:.2f})",wrap=True,fontsize=fontsizes[2])
         plt.legend()
 
         # Save the plot
         plt.tight_layout()
-        plt.savefig(filename, dpi=300)
+        plt.savefig(filename, dpi=800)
         plt.close('all')
         print(f"Saved histogram with normal curve as '{filename}'")
 
 
 #Function produced with AI assistance
-def plot_normality(series, filename="histogram.png", bins=30,title_stem=None):
+def plot_normality(series, filename="histogram.png", bins=30,title_stem=None,
+                   figsize=(8, 3.8),fontsizes=[10,11,11]):
         """
         Plot a histogram of a pandas Series with a normal density curve overlay.
 
@@ -344,13 +348,19 @@ def plot_normality(series, filename="histogram.png", bins=30,title_stem=None):
         mean = series.mean()
         std = series.std()
 
-        fig, axes = plt.subplots(1, 2, figsize=(8, 3.8))
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
         ## QQ plot for normality
-        qqplot(series, line='s', ax=axes[0], markerfacecolor="steelblue", markeredgecolor="steelblue", marker='o', alpha=0.9)
-        axes[0].set_title("Q-Q Plot for Normality",fontsize=9)
+        qqplot(series, line='s', ax=axes[0], markerfacecolor="steelblue", markeredgecolor="steelblue",
+               marker='o', alpha=0.9)
+        axes[0].set_title("Q-Q Plot for Normality",fontsize=fontsizes[1])
         # Create histogram
         #plt.figure(figsize=(8, 5))
-        count, bins_edges, _ = axes[1].hist(series, bins=bins, density=True, alpha=0.6, color='skyblue', edgecolor='black')
+        count, bins_edges, _ = axes[1].hist(series, bins=bins, density=True, alpha=0.6,
+                                            color='skyblue', edgecolor='black')
+
+        #axes[0].xticks(fontsize=fontsizes[0])
+        #axes[0].yticks(fontsize=fontsizes[0])
+        axes[0].tick_params(axis="both", labelsize=fontsizes[0])
 
         # Create normal density curve
         x = np.linspace(series.min(), series.max(), 200)
@@ -358,13 +368,18 @@ def plot_normality(series, filename="histogram.png", bins=30,title_stem=None):
         axes[1].plot(x, y, 'r-', linewidth=2, label='Normal PDF')
 
         # Add labels and title
-        axes[1].set_title(f"Histogram with Normal Curve (mean={mean:.2f}, std={std:.2f})",wrap=True,fontsize=9)
-        axes[1].set_xlabel("Value")
-        axes[1].set_ylabel("Density")
+        axes[1].set_title(f"Histogram with Normal Curve (mean={mean:.2f}, std={std:.2f})",
+                          wrap=True,fontsize=fontsizes[1])
+        axes[1].set_xlabel("Value",fontsize=fontsizes[1])
+        axes[1].set_ylabel("Density",fontsize=fontsizes[1])
+        #axes[1].xticks(fontsize=fontsizes[0])
+        #axes[1].yticks(fontsize=fontsizes[0])
+        axes[1].tick_params(axis="both",labelsize=fontsizes[0])
+
         if title_stem is not None:
-            plt.suptitle(f"{title_stem}",wrap=True,fontsize=10)
+            plt.suptitle(f"{title_stem}",wrap=True,fontsize=fontsizes[2])
         else:
-            plt.suptitle(f"Normality Plots for Series with mean={mean:.2f}, std={std:.2f}",wrap=True,fontsize=10)
+            plt.suptitle(f"Normality Plots for Series with mean={mean:.2f}, std={std:.2f}",wrap=True,fontsize=fontsizes[2])
 
 
         # Save the plot
