@@ -1,6 +1,6 @@
 generalConfig: ## This section is used generally throughout the process.
   SEED: 1
-  API_KEY: "0a71b2828ce455dbb120cebbb499b0b5bec91962" #optional to download census data from api
+  API_KEY:  #optional to download census data from api, insert your own here
   YEAR: 2016 #year of the data
   QTR: 1 #quarter for the data
   STATES: "ALL" #Optional to select a subset of states. 
